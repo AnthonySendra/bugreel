@@ -57,6 +57,18 @@ db.exec(`
   );
 `)
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS reel_comments (
+    id TEXT PRIMARY KEY,
+    reel_id TEXT NOT NULL,
+    parent_id TEXT,
+    user_id TEXT NOT NULL,
+    timestamp_ms INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+`)
+
 try { db.exec('ALTER TABLE reels ADD COLUMN app_id TEXT') } catch {}
 try { db.exec('ALTER TABLE reels ADD COLUMN uploaded_by_user_id TEXT') } catch {}
 try { db.exec('ALTER TABLE api_tokens ADD COLUMN user_id TEXT') } catch {}

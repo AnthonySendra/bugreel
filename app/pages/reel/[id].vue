@@ -27,9 +27,24 @@ const consolePanelEl = ref<HTMLElement | null>(null)
 const networkBodyEl = ref<HTMLElement | null>(null)
 const consoleCountEl = ref<HTMLElement | null>(null)
 const networkCountEl = ref<HTMLElement | null>(null)
+const commentsCountEl = ref<HTMLElement | null>(null)
 
 // ── State ─────────────────────────────────────────────────────────────────────
-const activeTab = ref<'console' | 'network'>('console')
+const activeTab = ref<'console' | 'network' | 'comments'>('console')
+const comments = ref<any[]>([])
+const newCommentContent = ref('')
+const openReplyId = ref<string | null>(null)
+const replyContent = ref('')
+const submitting = ref(false)
+const currentTimeDisplay = ref('0:00.0')
+
+const commentThreads = computed(() => {
+  const roots = comments.value.filter(c => !c.parent_id)
+  return roots.map(root => ({
+    ...root,
+    replies: comments.value.filter(c => c.parent_id === root.id),
+  }))
+})
 const loadError = ref('')
 const loading = ref(true)
 
@@ -276,6 +291,7 @@ function updateUI(t: number) {
   const pct = totalDuration > 0 ? (t / totalDuration) * 100 : 0
   if (progressFillEl.value) progressFillEl.value.style.width = `${pct}%`
   if (timeDisplayEl.value) timeDisplayEl.value.textContent = `${fmtTime(t)} / ${fmtTime(totalDuration)}`
+  currentTimeDisplay.value = fmtTime(t)
   // Update URL to reflect navigation at time t
   if (metaUrlEl.value && urlChanges.length) {
     let url = urlChanges[0].url
@@ -484,9 +500,74 @@ function escHtml(s: any) {
     .replace(/"/g, '&quot;')
 }
 
+// ── Comments ──────────────────────────────────────────────────────────────────
+async function loadComments() {
+  try {
+    const headers: Record<string, string> = token.value ? { Authorization: `Bearer ${token.value}` } : {}
+    const data = await $fetch<any[]>(`/api/reels/${reelId}/comments`, { headers })
+    comments.value = data
+    if (commentsCountEl.value) commentsCountEl.value.textContent = String(data.length)
+  } catch {}
+}
+
+async function submitComment() {
+  if (!newCommentContent.value.trim() || submitting.value) return
+  submitting.value = true
+  try {
+    const headers: Record<string, string> = token.value ? { Authorization: `Bearer ${token.value}` } : {}
+    await $fetch(`/api/reels/${reelId}/comments`, {
+      method: 'POST',
+      headers,
+      body: { content: newCommentContent.value.trim(), timestamp_ms: Math.round(clock.current) },
+    })
+    newCommentContent.value = ''
+    await loadComments()
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function submitReply(parentId: string) {
+  if (!replyContent.value.trim() || submitting.value) return
+  submitting.value = true
+  try {
+    const parent = comments.value.find(c => c.id === parentId)
+    const headers: Record<string, string> = token.value ? { Authorization: `Bearer ${token.value}` } : {}
+    await $fetch(`/api/reels/${reelId}/comments`, {
+      method: 'POST',
+      headers,
+      body: { content: replyContent.value.trim(), timestamp_ms: parent?.timestamp_ms ?? Math.round(clock.current), parent_id: parentId },
+    })
+    replyContent.value = ''
+    openReplyId.value = null
+    await loadComments()
+  } finally {
+    submitting.value = false
+  }
+}
+
+function jumpToComment(timestampMs: number) {
+  const wasPlaying = clock.playing
+  clock.seek(timestampMs)
+  if (seekerEl.value) seekerEl.value.value = String(timestampMs)
+  if (wasPlaying) {
+    replayer?.play(timestampMs)
+    clock.play(timestampMs)
+    scheduleTick()
+  } else {
+    replayer?.pause(timestampMs)
+    updateUI(timestampMs)
+  }
+}
+
+function fmtDate(ts: number) {
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(() => {
   loadReel()
+  loadComments()
 })
 
 onUnmounted(() => {
@@ -545,6 +626,14 @@ onUnmounted(() => {
               Network
               <span ref="networkCountEl" class="tab-count">0</span>
             </button>
+            <button
+              class="tab-btn"
+              :class="{ active: activeTab === 'comments' }"
+              @click="activeTab = 'comments'"
+            >
+              Comments
+              <span ref="commentsCountEl" class="tab-count">0</span>
+            </button>
           </div>
 
           <!-- Console panel -->
@@ -575,6 +664,72 @@ onUnmounted(() => {
               <tbody ref="networkBodyEl" id="network-body" />
             </table>
           </div>
+
+          <!-- Comments panel -->
+          <div
+            class="panel panel-comments"
+            :class="{ active: activeTab === 'comments' }"
+            id="comments-panel"
+          >
+            <!-- New comment form -->
+            <div class="cm-compose">
+              <textarea
+                v-model="newCommentContent"
+                class="cm-textarea"
+                placeholder="Add a comment at current time…"
+                rows="2"
+                @keydown.ctrl.enter.prevent="submitComment"
+                @keydown.meta.enter.prevent="submitComment"
+              />
+              <button class="cm-send-btn" :disabled="submitting || !newCommentContent.trim()" @click="submitComment">
+                Comment at {{ currentTimeDisplay }}
+              </button>
+            </div>
+
+            <!-- Thread list -->
+            <div v-if="commentThreads.length === 0" class="cm-empty">No comments yet</div>
+            <div v-for="thread in commentThreads" :key="thread.id" class="cm-thread">
+              <!-- Root comment -->
+              <div class="cm-msg cm-msg-root">
+                <div class="cm-header">
+                  <button class="cm-ts-btn" @click="jumpToComment(thread.timestamp_ms); activeTab = 'comments'">
+                    {{ fmtTime(thread.timestamp_ms) }}
+                  </button>
+                  <span class="cm-author">{{ thread.author_email }}</span>
+                  <span class="cm-date">{{ fmtDate(thread.created_at) }}</span>
+                </div>
+                <div class="cm-content">{{ thread.content }}</div>
+                <button class="cm-reply-toggle" @click="openReplyId = openReplyId === thread.id ? null : thread.id; replyContent = ''">
+                  Reply
+                </button>
+              </div>
+
+              <!-- Replies -->
+              <div v-for="reply in thread.replies" :key="reply.id" class="cm-msg cm-msg-reply">
+                <div class="cm-header">
+                  <span class="cm-author">{{ reply.author_email }}</span>
+                  <span class="cm-date">{{ fmtDate(reply.created_at) }}</span>
+                </div>
+                <div class="cm-content">{{ reply.content }}</div>
+              </div>
+
+              <!-- Reply form -->
+              <div v-if="openReplyId === thread.id" class="cm-reply-form">
+                <textarea
+                  v-model="replyContent"
+                  class="cm-textarea"
+                  placeholder="Write a reply…"
+                  rows="2"
+                  @keydown.ctrl.enter.prevent="submitReply(thread.id)"
+                  @keydown.meta.enter.prevent="submitReply(thread.id)"
+                />
+                <div class="cm-reply-actions">
+                  <button class="cm-cancel-btn" @click="openReplyId = null; replyContent = ''">Cancel</button>
+                  <button class="cm-send-btn cm-send-sm" :disabled="submitting || !replyContent.trim()" @click="submitReply(thread.id)">Reply</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -583,6 +738,15 @@ onUnmounted(() => {
         <button ref="playBtnEl" id="play-btn" @click="togglePlay">▶</button>
         <div id="timeline">
           <div ref="progressFillEl" id="progress-fill" />
+          <!-- Comment bubbles -->
+          <button
+            v-for="thread in commentThreads"
+            :key="thread.id"
+            class="cm-bubble"
+            :style="{ left: `${totalDuration > 0 ? (thread.timestamp_ms / totalDuration) * 100 : 0}%` }"
+            :title="thread.author_email + ': ' + thread.content"
+            @click.stop="jumpToComment(thread.timestamp_ms); activeTab = 'comments'"
+          />
           <input
             ref="seekerEl"
             id="seeker"
@@ -1069,4 +1233,193 @@ onUnmounted(() => {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Comment bubbles on timeline ─────────────────────────────────────────── */
+.cm-bubble {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #f5c542;
+  border: 2px solid #111113;
+  cursor: pointer;
+  padding: 0;
+  z-index: 2;
+  transition: transform 0.1s, background 0.1s;
+}
+
+.cm-bubble:hover {
+  background: #ffd966;
+  transform: translate(-50%, -50%) scale(1.3);
+}
+
+/* ── Comments panel ──────────────────────────────────────────────────────── */
+.panel-comments {
+  display: none;
+  flex-direction: column;
+}
+
+.panel-comments.active {
+  display: flex;
+}
+
+.cm-compose {
+  padding: 10px;
+  border-bottom: 1px solid #2e2e33;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cm-textarea {
+  background: #242428;
+  border: 1px solid #2e2e33;
+  border-radius: 5px;
+  color: #e2e2e6;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 7px 9px;
+  resize: none;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.cm-textarea:focus { border-color: #4c8dff; }
+.cm-textarea::placeholder { color: #6b6b76; }
+
+.cm-send-btn {
+  align-self: flex-end;
+  background: #4c8dff;
+  border: none;
+  border-radius: 5px;
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  transition: background 0.15s;
+}
+
+.cm-send-btn:hover:not(:disabled) { background: #3a7de8; }
+.cm-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.cm-send-sm { font-size: 11px; padding: 4px 10px; }
+
+.cm-empty {
+  padding: 20px;
+  text-align: center;
+  color: #6b6b76;
+  font-size: 12px;
+}
+
+.cm-thread {
+  border-bottom: 1px solid #2e2e33;
+  padding: 0;
+}
+
+.cm-msg {
+  padding: 9px 10px 6px;
+}
+
+.cm-msg-reply {
+  background: rgba(255,255,255,0.02);
+  padding-left: 22px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.cm-header {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.cm-ts-btn {
+  background: rgba(245, 197, 66, 0.15);
+  border: none;
+  border-radius: 3px;
+  color: #f5c542;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  transition: background 0.15s;
+}
+
+.cm-ts-btn:hover { background: rgba(245, 197, 66, 0.25); }
+
+.cm-author {
+  color: #e2e2e6;
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.cm-date {
+  color: #6b6b76;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.cm-content {
+  color: #c8c8ce;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cm-reply-toggle {
+  background: none;
+  border: none;
+  color: #6b6b76;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  margin-top: 4px;
+  padding: 2px 0;
+  transition: color 0.15s;
+}
+
+.cm-reply-toggle:hover { color: #4c8dff; }
+
+.cm-reply-form {
+  background: rgba(255,255,255,0.02);
+  border-top: 1px solid rgba(255,255,255,0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 8px 22px;
+}
+
+.cm-reply-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.cm-cancel-btn {
+  background: none;
+  border: 1px solid #2e2e33;
+  border-radius: 5px;
+  color: #6b6b76;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.cm-cancel-btn:hover { color: #e2e2e6; border-color: #6b6b76; }
 </style>
