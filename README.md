@@ -22,6 +22,14 @@ It is designed as an **internal tool** — meant to run on your company's privat
 
 ---
 
+## Why?
+
+Tools like [jam.dev](https://jam.dev) are great for capturing bugs, but they're SaaS — your DOM snapshots, console logs, and network requests all end up on someone else's servers. For companies that handle sensitive data or simply don't want to send internal app state to a third party, that's a dealbreaker.
+
+I looked for a self-hostable equivalent and couldn't find one. So Claude built this.
+
+---
+
 ## Storage
 
 Uses **SQLite** (`node:sqlite` with WAL mode) and the local filesystem. No external database required.
