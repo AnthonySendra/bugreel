@@ -1,0 +1,20 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+button, [role="button"] {
+  cursor: pointer;
+}
+
+@theme static {
+  --color-bugreel-50: #fff0f3;
+  --color-bugreel-100: #ffe0e8;
+  --color-bugreel-200: #ffc0d1;
+  --color-bugreel-300: #ff91b0;
+  --color-bugreel-400: #ff5888;
+  --color-bugreel-500: #ff4070;
+  --color-bugreel-600: #ed1050;
+  --color-bugreel-700: #c8003d;
+  --color-bugreel-800: #a8003a;
+  --color-bugreel-900: #8f0037;
+  --color-bugreel-950: #50001b;
+}
