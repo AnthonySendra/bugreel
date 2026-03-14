@@ -25,21 +25,15 @@ const ext = typeof browser !== 'undefined' ? browser : chrome;
       original[method] = console[method].bind(console);
       console[method] = function () {
         const args = Array.prototype.slice.call(arguments).map(serialize);
-        try {
-          window.dispatchEvent(new CustomEvent('__bugreel_console__', { detail: { level: method, args } }));
-        } catch (_) {}
+        try { window.postMessage({ __bugreel_type: 'console', level: method, args }, '*'); } catch (_) {}
         original[method].apply(console, arguments);
       };
     });
     window.addEventListener('error', function (e) {
-      window.dispatchEvent(new CustomEvent('__bugreel_console__', {
-        detail: { level: 'error', args: ['Uncaught ' + e.message, e.filename + ':' + e.lineno + ':' + e.colno] }
-      }));
+      window.postMessage({ __bugreel_type: 'console', level: 'error', args: ['Uncaught ' + e.message, e.filename + ':' + e.lineno + ':' + e.colno] }, '*');
     });
     window.addEventListener('unhandledrejection', function (e) {
-      window.dispatchEvent(new CustomEvent('__bugreel_console__', {
-        detail: { level: 'error', args: ['Unhandled Promise Rejection:', String(e.reason)] }
-      }));
+      window.postMessage({ __bugreel_type: 'console', level: 'error', args: ['Unhandled Promise Rejection:', String(e.reason)] }, '*');
     });
   })();`;
   document.documentElement.appendChild(script);
@@ -99,7 +93,8 @@ const ext = typeof browser !== 'undefined' ? browser : chrome;
       if (rrwebEvents.length > 0) {
         rrwebEvents.push({ type: 5, timestamp: Date.now(), data: { tag: 'bugreel-end', payload: {} } });
       }
-      window.dispatchEvent(new CustomEvent('__bugreel_data__', { detail: { rrwebEvents } }));
+      // postMessage clones data at call time — avoids Firefox XRay lazy evaluation on CustomEvent.detail
+      window.postMessage({ __bugreel_type: 'data', events: rrwebEvents }, '*');
       rrwebEvents = [];
     });
   })();`;
@@ -113,11 +108,14 @@ let isRecording = false;
 let consoleEvents = [];
 let startTime = null;
 
-// ── 4. Console events ─────────────────────────────────────────────────────────
+// ── 4. Console events + data transfer (postMessage — avoids Firefox XRay) ─────
 
-window.addEventListener('__bugreel_console__', (e) => {
-  if (!isRecording) return;
-  consoleEvents.push({ time: Date.now() - startTime, level: e.detail.level, args: e.detail.args });
+window.addEventListener('message', (e) => {
+  if (!e.data || !e.data.__bugreel_type) return;
+  if (e.data.__bugreel_type === 'console') {
+    if (!isRecording) return;
+    consoleEvents.push({ time: Date.now() - startTime, level: e.data.level, args: e.data.args });
+  }
 });
 
 // ── 5. Font inlining (content script has <all_urls> fetch permission) ─────────
@@ -220,11 +218,15 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'stopRecording': {
       if (!isRecording) { sendResponse({ rrwebEvents: [], consoleEvents: [], htmlSnapshot: null }); return true; }
       isRecording = false;
-      window.addEventListener('__bugreel_data__', async (e) => {
-        const htmlSnapshot = await captureHTMLSnapshot();
-        sendResponse({ rrwebEvents: e.detail.rrwebEvents, consoleEvents: [...consoleEvents], htmlSnapshot });
-        consoleEvents = [];
-      }, { once: true });
+      function onBugreelData(e) {
+        if (!e.data || e.data.__bugreel_type !== 'data') return;
+        window.removeEventListener('message', onBugreelData);
+        captureHTMLSnapshot().then((htmlSnapshot) => {
+          sendResponse({ rrwebEvents: e.data.events || [], consoleEvents: [...consoleEvents], htmlSnapshot });
+          consoleEvents = [];
+        });
+      }
+      window.addEventListener('message', onBugreelData);
       window.dispatchEvent(new CustomEvent('__bugreel_stop__'));
       return true; // async
     }

@@ -28,25 +28,17 @@
       original[method] = console[method].bind(console);
       console[method] = function () {
         const args = Array.prototype.slice.call(arguments).map(serialize);
-        try {
-          window.dispatchEvent(new CustomEvent('__jam_console__', {
-            detail: { level: method, args: args }
-          }));
-        } catch (_) {}
+        try { window.postMessage({ __bugreel_type: 'console', level: method, args: args }, '*'); } catch (_) {}
         original[method].apply(console, arguments);
       };
     });
 
     window.addEventListener('error', function (e) {
-      window.dispatchEvent(new CustomEvent('__jam_console__', {
-        detail: { level: 'error', args: ['Uncaught ' + e.message, e.filename + ':' + e.lineno + ':' + e.colno] }
-      }));
+      window.postMessage({ __bugreel_type: 'console', level: 'error', args: ['Uncaught ' + e.message, e.filename + ':' + e.lineno + ':' + e.colno] }, '*');
     });
 
     window.addEventListener('unhandledrejection', function (e) {
-      window.dispatchEvent(new CustomEvent('__jam_console__', {
-        detail: { level: 'error', args: ['Unhandled Promise Rejection:', String(e.reason)] }
-      }));
+      window.postMessage({ __bugreel_type: 'console', level: 'error', args: ['Unhandled Promise Rejection:', String(e.reason)] }, '*');
     });
   })();`;
   document.documentElement.appendChild(script);
@@ -92,9 +84,7 @@
 
     window.addEventListener('__jam_stop__', function () {
       if (stopFn) { stopFn(); stopFn = null; }
-      window.dispatchEvent(new CustomEvent('__jam_data__', {
-        detail: { rrwebEvents: rrwebEvents }
-      }));
+      window.postMessage({ __bugreel_type: 'data', events: rrwebEvents }, '*');
       rrwebEvents = [];
     });
   })();`;
@@ -110,13 +100,12 @@ let startTime = null;
 
 // ── 4. Console events (from page context) ────────────────────────────────────
 
-window.addEventListener('__jam_console__', (event) => {
-  if (!isRecording) return;
-  consoleEvents.push({
-    time: Date.now() - startTime,
-    level: event.detail.level,
-    args: event.detail.args,
-  });
+window.addEventListener('message', (e) => {
+  if (!e.data || !e.data.__bugreel_type) return;
+  if (e.data.__bugreel_type === 'console') {
+    if (!isRecording) return;
+    consoleEvents.push({ time: Date.now() - startTime, level: e.data.level, args: e.data.args });
+  }
 });
 
 // ── 5. Font inlining (content script has <all_urls> fetch permission) ─────────
@@ -183,14 +172,13 @@ browser.runtime.onMessage.addListener((message) => {
       isRecording = false;
 
       return new Promise((resolve) => {
-        window.addEventListener('__jam_data__', (e) => {
-          resolve({
-            rrwebEvents: e.detail.rrwebEvents,
-            consoleEvents: [...consoleEvents],
-          });
+        function onData(e) {
+          if (!e.data || e.data.__bugreel_type !== 'data') return;
+          window.removeEventListener('message', onData);
+          resolve({ rrwebEvents: e.data.events || [], consoleEvents: [...consoleEvents] });
           consoleEvents = [];
-        }, { once: true });
-
+        }
+        window.addEventListener('message', onData);
         window.dispatchEvent(new CustomEvent('__jam_stop__'));
       });
     }
