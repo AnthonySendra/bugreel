@@ -72,6 +72,19 @@ db.exec(`
 try { db.exec('ALTER TABLE reels ADD COLUMN app_id TEXT') } catch {}
 try { db.exec('ALTER TABLE reels ADD COLUMN uploaded_by_user_id TEXT') } catch {}
 try { db.exec('ALTER TABLE api_tokens ADD COLUMN user_id TEXT') } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0') } catch {}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS email_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+`)
 db.exec(`
   CREATE TABLE IF NOT EXISTS workspace_members (
     id TEXT PRIMARY KEY,

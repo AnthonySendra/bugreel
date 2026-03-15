@@ -1,126 +1,175 @@
 # bugreel
 
-> A vibe-coded, self-hosted alternative to [jam.dev](https://jam.dev).
+> A self-hosted alternative to [jam.dev](https://jam.dev).
 
 Record bugs without screen recording — capture DOM, console, and network as a structured, replayable file you can host yourself.
 
----
-
-## What is this?
-
-When a user hits a bug, they click **Record**, reproduce the issue, click **Stop**. They get a `.reel` file containing:
-
-- A **pixel-perfect DOM replay** — not a video, an interactive replay of the actual HTML
-- **Console logs** with timestamps
-- **Network requests** (XHR/Fetch) with status, headers, duration
-
-That file can be shared or uploaded to the bugreel viewer to be replayed in a web player.
-
-This project is intentionally kept simple and self-hosted. No SaaS, no tracking, no vendor lock-in.
-
-It is designed as an **internal tool** — meant to run on your company's private network, not exposed to the internet. Install the extension, record bugs, and share reels with your team without any data leaving your infrastructure.
+No SaaS, no tracking, no vendor lock-in. Runs on your own infrastructure.
 
 ---
 
-## Why?
+## Features
 
-Tools like [jam.dev](https://jam.dev) are great for capturing bugs, but they're SaaS — your DOM snapshots, console logs, and network requests all end up on someone else's servers. For companies that handle sensitive data or simply don't want to send internal app state to a third party, that's a dealbreaker.
+### Recording
 
-I looked for a self-hostable equivalent and couldn't find one. So Claude built this.
+| | Firefox extension | SDK (script tag) |
+|---|---|---|
+| DOM replay (rrweb) | ✅ | ✅ |
+| Console logs | ✅ | ✅ |
+| Uncaught errors & promise rejections | ✅ | ✅ |
+| Network requests (URL, method, headers, status, duration) | ✅ webRequest API | ✅ fetch/XHR intercept |
+| Network response bodies | ❌ browser restriction | ✅ JSON up to 5 KB |
+| Request body | ✅ | ✅ |
+| Click / input / navigation tracking | ✅ | ✅ |
+| Font inlining (base64) for faithful replay | ✅ | ❌ |
+| Multi-page recording (full-page navigations) | ✅ | ❌ single page |
+| Works without install | ❌ | ✅ |
+| Auto-upload to workspace | ✅ | ✅ |
+| Local download fallback | ✅ | ✅ |
+
+Recordings are saved as `.reel` files — gzipped JSON containing all streams.
+
+### Viewer
+
+- **DOM replay** — pixel-perfect interactive replay powered by rrweb, not a video
+- **Scrubber** — seek anywhere in the timeline; all panels sync to the current position
+- **Console panel** — logs, warnings, errors and uncaught exceptions with timestamps; scrolls with playback
+- **Network panel** — all requests in a table; click any row to expand headers, request body, and status
+- **Interactions panel** — ordered list of clicks, inputs, and navigations with seek-to buttons
+- **Comments** — timestamped threaded comments; yellow bubbles on the timeline; reply notifications by email
+- **Playwright export** — one click generates a ready-to-run `.spec.ts` reproduction script from the interaction events
+
+### Storage
+
+- **Database** — SQLite with WAL mode (`data/bugreel.db`)
+- **Reel files** — local disk by default (`data/reels/`), or any S3-compatible bucket (AWS S3, Cloudflare R2, MinIO)
+- **S3 uploads** — extension and SDK upload directly to S3 via presigned PUT URLs; viewer redirects to presigned GET URLs — the API server is never in the data path
 
 ---
 
-## Storage
+## Project structure
 
-Uses **SQLite** (`node:sqlite` with WAL mode) and the local filesystem. No external database required.
-
-- **Database**: `data/bugreel.db` — stores metadata for users, workspaces, apps, reels, API tokens, and workspace members
-- **Reel files**: `data/reels/{id}.reel` — gzipped JSON files stored on disk
-
-This keeps the setup zero-dependency beyond Node.js and makes backups trivial (just copy the `data/` folder).
-
----
-
-## Capture
-
-The browser extension captures three streams in parallel during a recording session:
-
-### DOM replay (rrweb)
-
-Uses [rrweb](https://github.com/rrweb-io/rrweb) to record DOM snapshots and mutations, mouse movements, scrolls, focus changes, and input events. Key settings:
-- `maskInputOptions: { password: true }` — passwords are masked
-- `slimDOMOptions` — strips scripts, comments, and unnecessary meta tags
-- `checkoutEveryNth: 200` — periodic full snapshots for seeking
-- A synthetic end-marker event (`type: 5`, tag `bugreel-end`) is appended so duration is known even on static pages
-
-External `@font-face` URLs are fetched and inlined as base64 during recording so fonts render correctly on replay. An optional full HTML snapshot (with external stylesheets inlined) can also be captured.
-
-### Console capture
-
-Content scripts run in an isolated JS context and cannot override the page's `console.*` methods directly. The solution: inject an inline `<script>` into the DOM at `document_start` that:
-1. Overrides `console.log/info/warn/error/debug/table/trace` in the page context
-2. Catches uncaught errors and unhandled promise rejections
-3. Dispatches a `CustomEvent` on `window`
-4. The content script listens to that event and stores timestamped entries
-
-### Network capture
-
-Via `browser.webRequest` in the background script:
-- `onBeforeRequest` — captures URL, method, request body
-- `onBeforeSendHeaders` — captures request headers
-- `onCompleted` / `onErrorOccurred` — captures status code, response headers, duration
-
-**Limitation**: `webRequest` cannot capture **response bodies** (browser security restriction). Only metadata is captured (status, headers, duration). Capturing bodies would require a different approach (page-side Service Worker interceptor or a local proxy).
-
-### Output format
-
-All three streams are merged into a single `.reel` file — gzipped JSON (via [fflate](https://github.com/101arrowz/fflate), level 6):
-
-```json
-{
-  "version": "1.0",
-  "meta": {
-    "url": "...",
-    "title": "...",
-    "recordedAt": "ISO8601",
-    "duration": 12345,
-    "userAgent": "..."
-  },
-  "rrwebEvents": [],
-  "consoleEvents": [{ "time": 0, "level": "log", "args": [] }],
-  "networkEvents": [{ "time": 0, "url": "...", "method": "GET", "status": 200 }],
-  "htmlSnapshot": "<!DOCTYPE html>..." 
-}
 ```
-
-The file can be uploaded to the server or downloaded locally.
+bugreel/
+├── app/          # Nuxt 4 web app (viewer + API)
+│   └── public/
+│       ├── sdk/recorder.js          # SDK served to end users
+│       └── recorder-lib/            # rrweb + fflate served by the app
+├── recorder/     # extension + SDK source
+│   ├── manifest.json
+│   ├── content.js / background.js / popup.*
+│   ├── lib/      # rrweb.min.js, fflate.min.js
+│   └── sdk/
+│       └── recorder.js              # SDK source
+```
 
 ---
 
 ## Setup
 
-### Extension
-
-```bash
-cd extension
-npm install
-npm run build
-```
-
 ### Web app
 
 ```bash
-cd server
+cd app
 npm install
-npm run dev       # starts at http://localhost:5555
+npm run dev       # http://localhost:7777
 ```
+
+### Extensions
+
+```bash
+cd recorder
+npm install
+npm run build
+# Load recorder/dist as a temporary extension in about:debugging
+```
+
+Configure the extension by clicking ⚙ in the popup:
+- **API URL** — base URL of your bugreel server
+- **App ID** — UUID of the app (visible in workspace settings)
+- **API Token** — token generated in workspace settings
+
+### SDK (no extension required)
+
+Add one script tag to your site:
+
+```html
+<script
+  src="https://your-bugreel.com/sdk/recorder.js"
+  data-host="https://your-bugreel.com"
+  data-app-id="your-app-id"
+  data-token="your-api-token"
+></script>
+```
+
+This injects a floating **⏺ Record Bug** button. On stop the recording is compressed and uploaded automatically.
+
+**Programmatic control** (no widget):
+
+```js
+BugreelRecorder.init({ host, appId, token, widget: false })
+BugreelRecorder.start()
+await BugreelRecorder.stop()
+```
+
+> When updating `recorder/sdk/recorder.js`, copy it to `app/public/sdk/recorder.js` and run `cp recorder/lib/*.min.js app/public/recorder-lib/` to keep served files in sync.
+
+---
+
+## S3 storage (optional)
+
+Set these in `app/.env`:
+
+```env
+NUXT_S3_REGION=us-east-1
+NUXT_S3_BUCKET=bugreel
+NUXT_S3_ACCESS_KEY_ID=your-access-key
+NUXT_S3_SECRET_ACCESS_KEY=your-secret-key
+
+# Non-AWS only (Cloudflare R2, MinIO, …)
+NUXT_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+```
+
+All five must be set for S3 to activate. Missing any falls back to local disk silently.
+
+**Bucket CORS** — allow `PUT` from extension/SDK origins:
+
+```json
+[{ "AllowedHeaders": ["*"], "AllowedMethods": ["PUT"], "AllowedOrigins": ["*"], "MaxAgeSeconds": 3600 }]
+```
+
+---
+
+## Email (optional)
+
+When configured, bugreel sends verification, password reset, workspace invitation, and comment reply emails.
+
+```env
+NUXT_EMAIL_PROVIDER=smtp        # smtp | resend | console
+NUXT_EMAIL_FROM=noreply@yourcompany.com
+NUXT_PUBLIC_BASE_URL=https://bugreel.yourcompany.com
+
+# SMTP
+NUXT_EMAIL_SMTP_HOST=smtp.yourprovider.com
+NUXT_EMAIL_SMTP_PORT=587
+NUXT_EMAIL_SMTP_USER=your-user
+NUXT_EMAIL_SMTP_PASS=your-password
+
+# Resend
+NUXT_EMAIL_RESEND_API_KEY=re_xxxxxxxxxxxxx
+```
+
+Leave `NUXT_EMAIL_PROVIDER` unset to disable all email sending.
+
 ---
 
 ## TODO
 
-- [ ] Add direct S3 upload  
-- [ ] Add messages with timestamp to the viewer  
-- [ ] Add email validation  
-- [ ] Add email invitation  
-- [ ] Add sdk to inject record widget direct on the website  
-- [ ] In viewer add tab to list all interactions (click, navigation, type)  
+- [x] DOM replay viewer with synchronized console, network, and interaction panels
+- [x] Timestamped threaded comments with timeline bubbles
+- [x] Email verification, password reset, workspace invitations, comment reply notifications
+- [x] Direct S3 upload via presigned URLs (extension + SDK bypass the API server)
+- [x] Multi-page DOM recording — full-page navigations continue the recording seamlessly
+- [x] SDK — embed a record button on any site without the extension
+- [x] Playwright export — generate a `.spec.ts` reproduction script from the interaction events
+- [ ] Support `target="_blank"` — new-tab navigations are not recorded (would need screen recording or multi-tab tracking)

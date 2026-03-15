@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { v4 as uuidv4 } from 'uuid'
+import { randomUUID, randomBytes } from 'crypto'
 import { db } from '~/server/utils/db'
+import { isEmailEnabled, sendVerificationEmail } from '~/server/utils/email'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'bugreel-dev-secret'
 
@@ -27,21 +28,37 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 409, message: 'Email already registered' })
   }
 
-  const id = uuidv4()
+  const id = randomUUID()
   const password_hash = await bcrypt.hash(password, 10)
   const created_at = Date.now()
+  const emailEnabled = isEmailEnabled()
+  const email_verified = emailEnabled ? 0 : 1 // auto-verify when email is not configured
 
-  db.prepare('INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)').run(
+  db.prepare('INSERT INTO users (id, email, password_hash, email_verified, created_at) VALUES (?, ?, ?, ?, ?)').run(
     id,
     email.toLowerCase(),
     password_hash,
+    email_verified,
     created_at,
   )
 
-  const token = jwt.sign({ id, email: email.toLowerCase() }, JWT_SECRET, { expiresIn: '30d' })
+  // Send verification email if email is configured
+  if (emailEnabled) {
+    const token = randomBytes(32).toString('hex')
+    const expires_at = Date.now() + 24 * 60 * 60 * 1000 // 24 hours
+
+    db.prepare('INSERT INTO email_tokens (id, user_id, type, token, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+      randomUUID(), id, 'verification', token, expires_at, Date.now(),
+    )
+
+    await sendVerificationEmail(email.toLowerCase(), token)
+  }
+
+  const jwtToken = jwt.sign({ id, email: email.toLowerCase() }, JWT_SECRET, { expiresIn: '30d' })
 
   return {
-    token,
-    user: { id, email: email.toLowerCase() },
+    token: jwtToken,
+    user: { id, email: email.toLowerCase(), email_verified: !!email_verified },
+    message: emailEnabled ? 'Please check your email to verify your account.' : undefined,
   }
 })

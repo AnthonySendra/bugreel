@@ -1,6 +1,8 @@
 /**
  * background.js
  * Captures network requests via the webRequest API.
+ * Also accumulates rrweb/console events flushed by content scripts across
+ * page navigations, so multi-page recordings work correctly.
  * Runs as a persistent background script (Manifest V2).
  */
 
@@ -8,6 +10,12 @@ let isRecording = false;
 let networkEvents = [];
 let recordingTabId = null;
 let startTime = null;
+
+// Accumulated rrweb + console events from all pages visited during the recording.
+// Content scripts flush these here periodically and before unloading.
+let accumulatedRrwebEvents = [];
+let accumulatedConsoleEvents = [];
+let accumulatedInteractionEvents = [];
 
 // Map of requestId -> partial event (built up across multiple listeners)
 const pendingRequests = new Map();
@@ -98,27 +106,53 @@ browser.webRequest.onErrorOccurred.addListener(
 
 // ─── Message handler ────────────────────────────────────────────────────────
 
-browser.runtime.onMessage.addListener((message) => {
+browser.runtime.onMessage.addListener((message, sender) => {
   switch (message.action) {
     case 'startRecording': {
       isRecording = true;
       networkEvents = [];
       pendingRequests.clear();
+      accumulatedRrwebEvents = [];
+      accumulatedConsoleEvents = [];
+      accumulatedInteractionEvents = [];
       recordingTabId = message.tabId;
       startTime = Date.now();
       return Promise.resolve({ success: true, startTime });
     }
 
+    // Content scripts flush events here periodically (every 3s) and on pagehide.
+    // Only accepted from the tab being recorded.
+    case 'flushEvents': {
+      if (!isRecording) return Promise.resolve({ success: false });
+      if (sender.tab && sender.tab.id !== recordingTabId) return Promise.resolve({ success: false });
+      accumulatedRrwebEvents.push(...(message.rrwebEvents || []));
+      accumulatedConsoleEvents.push(...(message.consoleEvents || []));
+      accumulatedInteractionEvents.push(...(message.interactionEvents || []));
+      return Promise.resolve({ success: true });
+    }
+
     case 'stopRecording': {
       isRecording = false;
-      const events = [...networkEvents];
+      const result = {
+        networkEvents: [...networkEvents],
+        rrwebEvents: [...accumulatedRrwebEvents],
+        consoleEvents: [...accumulatedConsoleEvents],
+        interactionEvents: [...accumulatedInteractionEvents],
+      };
       networkEvents = [];
+      accumulatedRrwebEvents = [];
+      accumulatedConsoleEvents = [];
+      accumulatedInteractionEvents = [];
       recordingTabId = null;
-      return Promise.resolve({ networkEvents: events });
+      return Promise.resolve(result);
     }
 
     case 'getState': {
-      return Promise.resolve({ isRecording, startTime });
+      // When called from a content script, only report isRecording=true if the
+      // sender is the tab being recorded — prevents other tabs from auto-starting.
+      const callerTabId = sender.tab ? sender.tab.id : null;
+      const activeForCaller = isRecording && (callerTabId === null || callerTabId === recordingTabId);
+      return Promise.resolve({ isRecording: activeForCaller, startTime });
     }
   }
 });

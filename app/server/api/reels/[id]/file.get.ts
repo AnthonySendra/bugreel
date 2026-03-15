@@ -2,6 +2,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { send } from 'h3'
 import { db, reelsDir } from '~/server/utils/db'
+import { getS3Config, presignedGetUrl } from '~/server/utils/s3'
 
 interface ReelRow {
   id: string
@@ -20,7 +21,7 @@ interface WorkspaceRow {
   owner_id: string
 }
 
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const user = event.context.user
   if (!user) throw createError({ statusCode: 401, message: 'Unauthorized' })
 
@@ -45,6 +46,13 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 403, message: 'Forbidden' })
   }
 
+  // S3 mode: redirect to presigned GET URL
+  if (getS3Config()) {
+    const url = await presignedGetUrl(reel.filename, 3600)
+    return sendRedirect(event, url, 302)
+  }
+
+  // Local disk mode
   const filePath = join(reelsDir, reel.filename)
 
   let buffer: Buffer

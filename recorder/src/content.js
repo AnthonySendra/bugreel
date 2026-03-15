@@ -102,13 +102,37 @@ const ext = typeof browser !== 'undefined' ? browser : chrome;
   ctrl.remove();
 })();
 
-// ── 3. State ──────────────────────────────────────────────────────────────────
+// ── 3. Navigation tracker (page context) ─────────────────────────────────────
+
+(function injectNavigationTracker() {
+  const script = document.createElement('script');
+  script.textContent = `(function () {
+    function emitNav(url) {
+      try {
+        var resolved = url ? new URL(String(url), location.href).href : location.href;
+        window.postMessage({ __bugreel_type: 'navigate', url: resolved }, '*');
+      } catch (_) {}
+    }
+    var origPush    = history.pushState.bind(history);
+    var origReplace = history.replaceState.bind(history);
+    history.pushState = function() { origPush.apply(history, arguments); emitNav(arguments[2]); };
+    history.replaceState = function() { origReplace.apply(history, arguments); emitNav(arguments[2]); };
+    window.addEventListener('popstate',   function() { emitNav(location.href); });
+    window.addEventListener('hashchange', function() { emitNav(location.href); });
+  })();`;
+  document.documentElement.appendChild(script);
+  script.remove();
+})();
+
+// ── 4. State ──────────────────────────────────────────────────────────────────
 
 let isRecording = false;
 let consoleEvents = [];
+let interactionEvents = [];
 let startTime = null;
+const inputDebounceTimers = new WeakMap();
 
-// ── 4. Console events + data transfer (postMessage — avoids Firefox XRay) ─────
+// ── 5. Messages from page context (console + data + navigate) ─────────────────
 
 window.addEventListener('message', (e) => {
   if (!e.data || !e.data.__bugreel_type) return;
@@ -116,7 +140,75 @@ window.addEventListener('message', (e) => {
     if (!isRecording) return;
     consoleEvents.push({ time: Date.now() - startTime, level: e.data.level, args: e.data.args });
   }
+  if (e.data.__bugreel_type === 'navigate') {
+    if (!isRecording) return;
+    interactionEvents.push({ time: Date.now() - startTime, type: 'navigate', url: e.data.url });
+  }
 });
+
+// ── 6. Interaction capture (click + input) ────────────────────────────────────
+
+function getInteractionLabel(el) {
+  return (
+    el.getAttribute('aria-label') ||
+    el.getAttribute('placeholder') ||
+    el.getAttribute('title') ||
+    el.getAttribute('alt') ||
+    el.getAttribute('name') ||
+    el.id ||
+    el.textContent?.trim() ||
+    ''
+  ).trim().slice(0, 80);
+}
+
+document.addEventListener('click', (e) => {
+  if (!isRecording) return;
+  const el = e.target;
+  const link = el.closest ? el.closest('a[href]') : null;
+  if (link) {
+    interactionEvents.push({
+      time: Date.now() - startTime,
+      type: 'click',
+      target: 'a',
+      label: (link.textContent?.trim() || link.getAttribute('aria-label') || '').slice(0, 80),
+      href: link.href,
+    });
+  } else {
+    interactionEvents.push({
+      time: Date.now() - startTime,
+      type: 'click',
+      target: el.tagName?.toLowerCase() || 'unknown',
+      label: getInteractionLabel(el),
+    });
+  }
+}, true);
+
+window.addEventListener('popstate', () => {
+  if (!isRecording) return;
+  interactionEvents.push({ time: Date.now() - startTime, type: 'navigate', url: location.href });
+});
+window.addEventListener('hashchange', () => {
+  if (!isRecording) return;
+  interactionEvents.push({ time: Date.now() - startTime, type: 'navigate', url: location.href });
+});
+
+document.addEventListener('input', (e) => {
+  if (!isRecording) return;
+  const el = e.target;
+  if (inputDebounceTimers.has(el)) clearTimeout(inputDebounceTimers.get(el));
+  const t = setTimeout(() => {
+    const isPassword = el.type === 'password';
+    interactionEvents.push({
+      time: Date.now() - startTime,
+      type: 'input',
+      target: el.tagName?.toLowerCase() || 'input',
+      label: getInteractionLabel(el),
+      value: isPassword ? '••••••' : (el.value || '').slice(0, 200),
+    });
+    inputDebounceTimers.delete(el);
+  }, 600);
+  inputDebounceTimers.set(el, t);
+}, true);
 
 // ── 5. Font inlining (content script has <all_urls> fetch permission) ─────────
 
@@ -208,6 +300,7 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (isRecording) { sendResponse({ success: true }); return true; }
       isRecording = true;
       consoleEvents = [];
+      interactionEvents = [];
       startTime = message.startTime;
       inlineFonts().then(() => {
         window.dispatchEvent(new CustomEvent('__bugreel_start__'));
@@ -222,8 +315,9 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (!e.data || e.data.__bugreel_type !== 'data') return;
         window.removeEventListener('message', onBugreelData);
         captureHTMLSnapshot().then((htmlSnapshot) => {
-          sendResponse({ rrwebEvents: e.data.events || [], consoleEvents: [...consoleEvents], htmlSnapshot });
+          sendResponse({ rrwebEvents: e.data.events || [], consoleEvents: [...consoleEvents], interactionEvents: [...interactionEvents], htmlSnapshot });
           consoleEvents = [];
+          interactionEvents = [];
         });
       }
       window.addEventListener('message', onBugreelData);

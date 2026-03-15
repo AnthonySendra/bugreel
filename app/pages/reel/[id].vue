@@ -27,10 +27,13 @@ const consolePanelEl = ref<HTMLElement | null>(null)
 const networkBodyEl = ref<HTMLElement | null>(null)
 const consoleCountEl = ref<HTMLElement | null>(null)
 const networkCountEl = ref<HTMLElement | null>(null)
+const interactionsCountEl = ref<HTMLElement | null>(null)
+const interactionsPanelEl = ref<HTMLElement | null>(null)
+const interactionsListEl = ref<HTMLElement | null>(null)
 const commentsCountEl = ref<HTMLElement | null>(null)
 
 // ── State ─────────────────────────────────────────────────────────────────────
-const activeTab = ref<'console' | 'network' | 'comments'>('console')
+const activeTab = ref<'console' | 'network' | 'interactions' | 'comments'>('console')
 const comments = ref<any[]>([])
 const newCommentContent = ref('')
 const openReplyId = ref<string | null>(null)
@@ -114,11 +117,12 @@ async function loadReel() {
 
 // ── Viewer init ───────────────────────────────────────────────────────────────
 function initViewer() {
-  const { consoleEvents = [], networkEvents = [], meta = {} } = recording
+  const { consoleEvents = [], networkEvents = [], interactionEvents = [], meta = {} } = recording
 
   if (metaDateEl.value) metaDateEl.value.textContent = meta.recordedAt ? new Date(meta.recordedAt).toLocaleString() : ''
   if (consoleCountEl.value) consoleCountEl.value.textContent = String(consoleEvents.length)
   if (networkCountEl.value) networkCountEl.value.textContent = String(networkEvents.length)
+  if (interactionsCountEl.value) interactionsCountEl.value.textContent = String(interactionEvents.length)
 
   // Raw events: used for duration (includes bugreel-end marker)
   const rawEvents: any[] = recording.rrwebEvents || []
@@ -141,18 +145,30 @@ function initViewer() {
   // This handles static pages where rrweb emits no incremental events.
   totalDuration = Math.max(lastTs - firstTs, recording.meta?.duration ?? 0)
 
-  // Build URL change timeline: initial URL + navigation events (type 3, source 4)
+  // Build URL change timeline from multiple sources:
+  // 1. Initial URL from rrweb MetaEvent or recording meta
+  // 2. Navigate events from interactionEvents (pushState/replaceState + popstate/hashchange)
+  // 3. Additional rrweb MetaEvents from checkouts (fires every 200 events with current URL)
   urlChanges = []
-  if (metaEvent?.data?.href) {
-    urlChanges.push({ offset: 0, url: metaEvent.data.href })
-  } else if (meta.url) {
-    urlChanges.push({ offset: 0, url: meta.url })
-  }
+  const initialUrl = metaEvent?.data?.href || meta.url || ''
+  if (initialUrl) urlChanges.push({ offset: 0, url: initialUrl })
+
+  // rrweb checkout MetaEvents (type 4) after the first one — may reflect post-navigation URL
   for (const e of rrwebEvents) {
-    if (e.type === 3 && e.data?.source === 4 && e.data?.href) {
+    if (e.type === 4 && e.timestamp > firstTs && e.data?.href && e.data.href !== initialUrl) {
       urlChanges.push({ offset: e.timestamp - firstTs, url: e.data.href })
     }
   }
+
+  // interactionEvents: navigate events from our custom capture (most reliable for SPAs)
+  for (const e of (recording.interactionEvents || [])) {
+    if (e.type === 'navigate') {
+      urlChanges.push({ offset: e.time, url: e.url })
+    }
+  }
+
+  urlChanges.sort((a, b) => a.offset - b.offset)
+  console.log('[bugreel] urlChanges:', urlChanges.length, urlChanges)
 
   if (metaUrlEl.value) metaUrlEl.value.textContent = urlChanges[0]?.url || meta.url || ''
 
@@ -190,6 +206,7 @@ function initViewer() {
 
   renderNetworkTable()
   resetConsole()
+  resetInteractions()
   updateUI(0)
   scheduleTick()
 }
@@ -303,6 +320,7 @@ function updateUI(t: number) {
   }
   updateConsole(t)
   updateNetwork(t)
+  updateInteractions(t)
 }
 
 // ── Console ───────────────────────────────────────────────────────────────────
@@ -344,6 +362,81 @@ function buildConsoleEntry(ev: any) {
   msg.className = 'c-msg'
   msg.textContent = ev.args.map((a: any) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')
   row.append(ts, badge, msg)
+  return row
+}
+
+// ── Interactions ──────────────────────────────────────────────────────────────
+let lastInteractionIdx = 0
+
+function resetInteractions() {
+  if (interactionsListEl.value) interactionsListEl.value.innerHTML = ''
+  lastInteractionIdx = 0
+}
+
+function updateInteractions(t: number) {
+  if (!recording || !interactionsListEl.value) return
+  const events = recording.interactionEvents || []
+  if (lastInteractionIdx > 0 && events[lastInteractionIdx - 1]?.time > t) {
+    interactionsListEl.value.innerHTML = ''
+    lastInteractionIdx = 0
+  }
+  let appended = false
+  while (lastInteractionIdx < events.length && events[lastInteractionIdx].time <= t) {
+    interactionsListEl.value.appendChild(buildInteractionEntry(events[lastInteractionIdx]))
+    lastInteractionIdx++
+    appended = true
+  }
+  if (appended && clock.playing && interactionsPanelEl.value) {
+    interactionsPanelEl.value.scrollTop = interactionsPanelEl.value.scrollHeight
+  }
+}
+
+function buildInteractionEntry(ev: any) {
+  const row = document.createElement('div')
+  row.className = `ix-row ix-${ev.type}`
+
+  const ts = document.createElement('button')
+  ts.className = 'ix-ts'
+  ts.textContent = fmtTime(ev.time)
+  ts.addEventListener('click', () => jumpToComment(ev.time))
+
+  const icon = document.createElement('span')
+  icon.className = 'ix-icon'
+  icon.textContent = ev.type === 'navigate' ? '↗' : ev.type === 'input' ? '✎' : '↖'
+
+  const body = document.createElement('span')
+  body.className = 'ix-body'
+
+  if (ev.type === 'navigate') {
+    body.textContent = ev.url
+  } else if (ev.type === 'input') {
+    const lbl = ev.label ? `${ev.label}: ` : ''
+    body.textContent = `${lbl}"${ev.value}"`
+  } else {
+    // click (regular or link)
+    if (ev.href) {
+      // Link click: show label + destination URL
+      if (ev.label) {
+        body.textContent = ev.label
+        const hrefSpan = document.createElement('span')
+        hrefSpan.className = 'ix-tag'
+        hrefSpan.textContent = ` → ${ev.href}`
+        body.appendChild(hrefSpan)
+      } else {
+        body.textContent = ev.href
+      }
+    } else {
+      body.textContent = ev.label || `<${ev.target || '?'}>`
+      if (ev.label && ev.target) {
+        const tagSpan = document.createElement('span')
+        tagSpan.className = 'ix-tag'
+        tagSpan.textContent = ` <${ev.target}>`
+        body.appendChild(tagSpan)
+      }
+    }
+  }
+
+  row.append(ts, icon, body)
   return row
 }
 
@@ -564,6 +657,103 @@ function fmtDate(ts: number) {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+// ── Playwright export ──────────────────────────────────────────────────────────
+
+function clickAction(ev: any): string {
+  const j = (s: string) => JSON.stringify(s)
+  const { target, label, href } = ev
+  if (target === 'a' || href) {
+    if (label) return `page.getByRole('link', { name: ${j(label)} }).click()`
+    if (href)  return `page.goto(${j(href)})`
+  }
+  if (target === 'button' && label) return `page.getByRole('button', { name: ${j(label)} }).click()`
+  if (label) return `page.getByText(${j(label)}, { exact: true }).click()`
+  return `page.locator(${j(target || '*')}).first().click() // TODO: refine selector`
+}
+
+function fillAction(ev: any): string {
+  const j = (s: string) => JSON.stringify(s)
+  const { label, value } = ev
+  if (label) return `page.getByLabel(${j(label)}).fill(${j(value ?? '')})`
+  return `page.locator('input').first().fill(${j(value ?? '')}) // TODO: refine selector`
+}
+
+function generatePlaywrightScript(): string {
+  const events: any[] = recording?.interactionEvents || []
+  const meta: any = recording?.meta || {}
+  const startUrl: string = meta.url || 'https://your-app.com'
+  const recordedAt: string = meta.recordedAt
+    ? new Date(meta.recordedAt).toLocaleString()
+    : 'unknown'
+  const j = (s: string) => JSON.stringify(s)
+
+  const lines: string[] = []
+
+  lines.push(`import { test, expect } from '@playwright/test'`)
+  lines.push(``)
+  lines.push(`/**`)
+  lines.push(` * Bug reproduction — generated by Bugreel`)
+  lines.push(` * Recorded : ${recordedAt}`)
+  lines.push(` * URL      : ${startUrl}`)
+  lines.push(` *`)
+  lines.push(` * Selectors marked TODO may need adjusting to match your DOM.`)
+  lines.push(` */`)
+  lines.push(`test('bug reproduction', async ({ page }) => {`)
+  lines.push(`  await page.goto(${j(startUrl)})`)
+  lines.push(``)
+
+  let lastUrl = startUrl
+  let lastTime = 0
+
+  for (const ev of events) {
+    // Flag significant pauses so the developer knows there was a wait
+    const gap = ev.time - lastTime
+    if (gap > 3000 && lastTime > 0) {
+      lines.push(`  // — ${Math.round(gap / 1000)}s pause —`)
+    }
+    lastTime = ev.time
+
+    if (ev.type === 'navigate') {
+      if (ev.url === lastUrl) continue
+      lines.push(`  await page.waitForURL(${j(ev.url)})`)
+      lastUrl = ev.url
+      lines.push(``)
+    }
+    else if (ev.type === 'click') {
+      const comment = ev.href
+        ? `click: ${ev.label || ev.target} → ${ev.href}`
+        : `click: ${ev.label || ev.target}`
+      lines.push(`  // ${comment}`)
+      lines.push(`  await ${clickAction(ev)}`)
+      lines.push(``)
+    }
+    else if (ev.type === 'input') {
+      lines.push(`  // fill: ${ev.label || 'input'}`)
+      lines.push(`  await ${fillAction(ev)}`)
+      lines.push(``)
+    }
+  }
+
+  lines.push(`  // TODO: add assertions to verify the expected behaviour`)
+  lines.push(`  // e.g. await expect(page.getByText('Error')).toBeVisible()`)
+  lines.push(`})`)
+
+  return lines.join('\n')
+}
+
+function downloadPlaywright() {
+  const script = generatePlaywrightScript()
+  const blob = new Blob([script], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `bugreel-repro-${reelId.slice(0, 8)}.spec.ts`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 5000)
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(() => {
   loadReel()
@@ -598,6 +788,9 @@ onUnmounted(() => {
         <span class="meta-sep">·</span>
         <span class="meta-label">Recorded</span>
         <span ref="metaDateEl" class="meta-value" />
+        <button class="meta-export-btn" title="Export Playwright reproduction script" @click="downloadPlaywright">
+          <span class="meta-export-icon">⬇</span> Playwright
+        </button>
       </div>
 
       <!-- Main area -->
@@ -625,6 +818,14 @@ onUnmounted(() => {
             >
               Network
               <span ref="networkCountEl" class="tab-count">0</span>
+            </button>
+            <button
+              class="tab-btn"
+              :class="{ active: activeTab === 'interactions' }"
+              @click="activeTab = 'interactions'"
+            >
+              Events
+              <span ref="interactionsCountEl" class="tab-count">0</span>
             </button>
             <button
               class="tab-btn"
@@ -663,6 +864,16 @@ onUnmounted(() => {
               </thead>
               <tbody ref="networkBodyEl" id="network-body" />
             </table>
+          </div>
+
+          <!-- Interactions panel -->
+          <div
+            ref="interactionsPanelEl"
+            class="panel"
+            :class="{ active: activeTab === 'interactions' }"
+            id="interactions-panel"
+          >
+            <div ref="interactionsListEl" id="interactions-list" />
           </div>
 
           <!-- Comments panel -->
@@ -854,6 +1065,30 @@ onUnmounted(() => {
 }
 
 .meta-sep { color: #2e2e33; }
+
+.meta-export-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 4px;
+  border: 1px solid #2e2e33;
+  background: transparent;
+  color: #9b9ba8;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.meta-export-btn:hover {
+  color: #e2e2e6;
+  border-color: #4c8dff;
+  background: rgba(76, 141, 255, 0.08);
+}
+.meta-export-icon { font-size: 9px; }
 
 /* ── Main ────────────────────────────────────────────────────────────────── */
 #main {
@@ -1253,6 +1488,70 @@ onUnmounted(() => {
 .cm-bubble:hover {
   background: #ffd966;
   transform: translate(-50%, -50%) scale(1.3);
+}
+
+/* ── Interactions panel ──────────────────────────────────────────────────── */
+#interactions-list { padding: 2px 0; }
+
+:deep(.ix-row) {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 4px 10px 4px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  border-left: 2px solid transparent;
+}
+
+:deep(.ix-row:hover) { background: rgba(255,255,255,0.03); }
+:deep(.ix-navigate) { border-left-color: #4c8dff; }
+:deep(.ix-input)    { border-left-color: #3ecf8e; }
+:deep(.ix-click)    { border-left-color: #6b6b76; }
+
+:deep(.ix-ts) {
+  color: #f5c542;
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 46px;
+  background: rgba(245, 197, 66, 0.12);
+  border: none;
+  border-radius: 3px;
+  padding: 1px 5px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+:deep(.ix-ts:hover) { background: rgba(245, 197, 66, 0.25); }
+
+:deep(.ix-icon) {
+  flex-shrink: 0;
+  font-size: 12px;
+  width: 14px;
+  text-align: center;
+}
+
+:deep(.ix-navigate .ix-icon) { color: #4c8dff; }
+:deep(.ix-input .ix-icon)    { color: #3ecf8e; }
+:deep(.ix-click .ix-icon)    { color: #6b6b76; }
+
+:deep(.ix-body) {
+  color: #e2e2e6;
+  word-break: break-all;
+  white-space: pre-wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+:deep(.ix-navigate .ix-body) { color: #4c8dff; }
+:deep(.ix-input .ix-body)    { color: #c8c8ce; }
+
+:deep(.ix-tag) {
+  color: #6b6b76;
+  font-size: 10px;
 }
 
 /* ── Comments panel ──────────────────────────────────────────────────────── */

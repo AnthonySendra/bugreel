@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid'
 import { db } from '~/server/utils/db'
+import { sendWorkspaceInviteEmail } from '~/server/utils/email'
 
-interface WorkspaceRow { id: string; owner_id: string }
+interface WorkspaceRow { id: string; owner_id: string; name: string }
 interface UserRow { id: string; email: string }
 
 export default defineEventHandler(async (event) => {
@@ -9,7 +10,7 @@ export default defineEventHandler(async (event) => {
   if (!user) throw createError({ statusCode: 401, message: 'Unauthorized' })
 
   const workspaceId = getRouterParam(event, 'id')
-  const workspace = db.prepare('SELECT id, owner_id FROM workspaces WHERE id = ?').get(workspaceId) as WorkspaceRow | undefined
+  const workspace = db.prepare('SELECT id, owner_id, name FROM workspaces WHERE id = ?').get(workspaceId) as WorkspaceRow | undefined
 
   if (!workspace) throw createError({ statusCode: 404, message: 'Workspace not found' })
   if (workspace.owner_id !== user.id) throw createError({ statusCode: 403, message: 'Forbidden' })
@@ -29,6 +30,9 @@ export default defineEventHandler(async (event) => {
   } catch {
     throw createError({ statusCode: 409, message: 'This user is already a member' })
   }
+
+  // Send invitation email (fire-and-forget)
+  sendWorkspaceInviteEmail(target.email, workspace.name, user.email).catch(() => {})
 
   return { id: target.id, email: target.email }
 })
