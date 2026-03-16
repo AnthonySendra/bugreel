@@ -44,6 +44,8 @@ export default defineEventHandler((event) => {
     // File may already be missing — continue
   }
 
+  // Delete comments before the reel itself
+  db.prepare('DELETE FROM reel_comments WHERE reel_id = ?').run(reelId)
   db.prepare('DELETE FROM reels WHERE id = ?').run(reelId)
 
   return { ok: true }

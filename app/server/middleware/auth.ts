@@ -1,6 +1,5 @@
 import jwt from 'jsonwebtoken'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'bugreel-dev-secret'
+import { getJwtSecret } from '~/server/utils/jwt'
 
 export default defineEventHandler((event) => {
   // Initialize user context as null
@@ -23,7 +22,7 @@ export default defineEventHandler((event) => {
   if (!token) return
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { id: string; email: string }
+    const payload = jwt.verify(token, getJwtSecret(event)) as { id: string; email: string }
     event.context.user = { id: payload.id, email: payload.email }
   } catch {
     // Invalid or expired token — leave context.user as null

@@ -1,5 +1,8 @@
 export default defineNuxtConfig({
   runtimeConfig: {
+    // JWT signing secret — REQUIRED in production (set NUXT_JWT_SECRET)
+    jwtSecret: '',
+
     // S3-compatible storage (all optional — falls back to local disk when not set)
     // Env vars: NUXT_S3_REGION, NUXT_S3_ENDPOINT, NUXT_S3_BUCKET,
     //           NUXT_S3_ACCESS_KEY_ID, NUXT_S3_SECRET_ACCESS_KEY
@@ -27,7 +30,12 @@ export default defineNuxtConfig({
     },
   },
   css: ['~/assets/css/main.css'],
-  devServer: { port: 7777 },
+  devServer: { port: 7777, host: '::' },
+  vite: {
+    server: {
+      cors: true,
+    },
+  },
   colorMode: { preference: 'dark' },
   nitro: {
     experimental: {
@@ -35,6 +43,14 @@ export default defineNuxtConfig({
     },
     externals: {
       inline: [],
+    },
+    routeRules: {
+      '/sdk/**': {
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+      },
+      '/workspace/**': { ssr: false },
+      '/dashboard/**': { ssr: false },
+      '/reel/**': { ssr: false },
     },
   },
 })

@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { db } from '~/server/utils/db'
 import { sendWorkspaceInviteEmail } from '~/server/utils/email'
+import { isValidEmail } from '~/server/utils/validate'
 
 interface WorkspaceRow { id: string; owner_id: string; name: string }
 interface UserRow { id: string; email: string }
@@ -18,6 +19,7 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const email = body?.email?.toLowerCase?.()?.trim()
   if (!email) throw createError({ statusCode: 400, message: 'Email is required' })
+  if (!isValidEmail(email)) throw createError({ statusCode: 400, message: 'Invalid email address' })
 
   const target = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email) as UserRow | undefined
   if (!target) throw createError({ statusCode: 404, message: 'No user found with this email' })

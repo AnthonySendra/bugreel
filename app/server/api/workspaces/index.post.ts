@@ -12,6 +12,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Workspace name is required' })
   }
 
+  if (name.trim().length > 100) {
+    throw createError({ statusCode: 400, message: 'Workspace name must be 100 characters or fewer' })
+  }
+
   const id = uuidv4()
   const created_at = Date.now()
 

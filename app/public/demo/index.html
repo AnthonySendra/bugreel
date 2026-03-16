@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flowboard — Ship Projects Faster</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg-primary: #0b0d17;
+      --bg-secondary: #111427;
+      --bg-card: #161938;
+      --bg-card-hover: #1c2045;
+      --border: #232750;
+      --text-primary: #e8eaf6;
+      --text-secondary: #8b90b8;
+      --text-muted: #5c6096;
+      --accent: #6c5ce7;
+      --accent-light: #a29bfe;
+      --accent-glow: rgba(108, 92, 231, 0.25);
+      --accent-green: #00cec9;
+      --accent-pink: #fd79a8;
+      --radius: 12px;
+      --radius-lg: 20px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(11, 13, 23, 0.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 72px;
+    }
+
+    .logo {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-icon {
+      width: 34px;
+      height: 34px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-pink));
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-links a {
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      transition: all 0.2s;
+    }
+
+    .nav-links a:hover {
+      color: var(--text-primary);
+      background: var(--bg-card);
+    }
+
+    .nav-cta {
+      margin-left: 16px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 22px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      border: none;
+      transition: all 0.25s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    .btn-primary:hover {
+      background: #7c6ff0;
+      box-shadow: 0 0 30px rgba(108, 92, 231, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--accent);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+    }
+
+    .btn-ghost:hover {
+      color: var(--text-primary);
+    }
+
+    .btn-lg {
+      padding: 14px 32px;
+      font-size: 16px;
+      border-radius: 12px;
+    }
+
+    /* ── HERO ── */
+    .hero {
+      padding: 160px 0 100px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 800px;
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px 6px 8px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+    }
+
+    .hero-badge span {
+      background: var(--accent);
+      color: #fff;
+      padding: 2px 10px;
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .hero h1 {
+      font-size: 72px;
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -2.5px;
+      margin-bottom: 24px;
+      position: relative;
+    }
+
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, var(--accent-light), var(--accent-pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero p {
+      font-size: 20px;
+      color: var(--text-secondary);
+      max-width: 560px;
+      margin: 0 auto 48px;
+      line-height: 1.7;
+    }
+
+    .hero-buttons {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      margin-bottom: 80px;
+    }
+
+    /* ── DASHBOARD MOCKUP ── */
+    .dashboard-mockup {
+      max-width: 960px;
+      margin: 0 auto;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: 0 40px 80px rgba(0,0,0,0.4), 0 0 60px var(--accent-glow);
+    }
+
+    .mockup-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 20px;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .mockup-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .mockup-dot.red { background: #ff5f57; }
+    .mockup-dot.yellow { background: #febc2e; }
+    .mockup-dot.green { background: #28c840; }
+
+    .mockup-body {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      min-height: 340px;
+    }
+
+    .mockup-sidebar {
+      background: var(--bg-card);
+      border-right: 1px solid var(--border);
+      padding: 20px 16px;
+    }
+
+    .mockup-sidebar-item {
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .mockup-sidebar-item.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .mockup-content {
+      padding: 24px;
+    }
+
+    .mockup-columns {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .mockup-col-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .mockup-card {
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+
+    .mockup-card-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .tag-purple { background: rgba(108,92,231,0.2); color: var(--accent-light); }
+    .tag-green { background: rgba(0,206,201,0.2); color: var(--accent-green); }
+    .tag-pink { background: rgba(253,121,168,0.2); color: var(--accent-pink); }
+
+    /* ── LOGOS ── */
+    .logos-section {
+      padding: 80px 0 40px;
+      text-align: center;
+    }
+
+    .logos-section p {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+
+    .logos-grid {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 60px;
+      flex-wrap: wrap;
+      opacity: 0.4;
+    }
+
+    .fake-logo {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--text-secondary);
+    }
+
+    /* ── FEATURES ── */
+    .features-section {
+      padding: 120px 0;
+    }
+
+    .section-label {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--accent-light);
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 44px;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      margin-bottom: 16px;
+      line-height: 1.15;
+    }
+
+    .section-subtitle {
+      font-size: 18px;
+      color: var(--text-secondary);
+      max-width: 520px;
+      line-height: 1.7;
+    }
+
+    .section-header {
+      margin-bottom: 64px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 40px;
+      transition: all 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .feature-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-pink));
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .feature-card:hover {
+      border-color: var(--accent);
+      background: var(--bg-card-hover);
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+    }
+
+    .feature-card:hover::before {
+      opacity: 1;
+    }
+
+    .feature-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 24px;
+    }
+
+    .icon-purple { background: rgba(108,92,231,0.15); }
+    .icon-green { background: rgba(0,206,201,0.15); }
+    .icon-pink { background: rgba(253,121,168,0.15); }
+    .icon-blue { background: rgba(116,185,255,0.15); }
+
+    .feature-card h3 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      letter-spacing: -0.3px;
+    }
+
+    .feature-card p {
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    /* ── PRICING ── */
+    .pricing-section {
+      padding: 120px 0;
+      position: relative;
+    }
+
+    .pricing-section::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(108,92,231,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .pricing-header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    .pricing-header .section-subtitle {
+      margin: 0 auto;
+    }
+
+    /* ── TOGGLE ── */
+    .pricing-toggle-wrapper {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin-top: 32px;
+    }
+
+    .pricing-toggle-label {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      transition: color 0.2s;
+    }
+
+    .pricing-toggle-label.active {
+      color: var(--text-primary);
+    }
+
+    .pricing-toggle {
+      width: 52px;
+      height: 28px;
+      background: var(--bg-card);
+      border: 2px solid var(--border);
+      border-radius: 100px;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.3s;
+    }
+
+    .pricing-toggle.yearly {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .pricing-toggle-knob {
+      width: 20px;
+      height: 20px;
+      background: #fff;
+      border-radius: 50%;
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      transition: transform 0.3s;
+    }
+
+    .pricing-toggle.yearly .pricing-toggle-knob {
+      transform: translateX(24px);
+    }
+
+    .save-badge {
+      background: rgba(0, 206, 201, 0.15);
+      color: var(--accent-green);
+      padding: 4px 12px;
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      position: relative;
+    }
+
+    .pricing-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 40px;
+      transition: all 0.3s;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .pricing-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+    }
+
+    .pricing-card.featured {
+      border-color: var(--accent);
+      background: linear-gradient(180deg, #1a1d45 0%, var(--bg-card) 100%);
+      box-shadow: 0 0 40px var(--accent-glow);
+    }
+
+    .pricing-popular {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      padding: 4px 14px;
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 16px;
+      align-self: flex-start;
+    }
+
+    .pricing-card h3 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .pricing-card .price {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -2px;
+      margin: 16px 0;
+    }
+
+    .pricing-card .price .currency {
+      font-size: 24px;
+      vertical-align: top;
+      margin-right: 2px;
+    }
+
+    .pricing-card .price .period {
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .pricing-card .description {
+      color: var(--text-secondary);
+      font-size: 14px;
+      margin-bottom: 32px;
+      line-height: 1.6;
+    }
+
+    .pricing-features {
+      list-style: none;
+      margin-bottom: 32px;
+      flex-grow: 1;
+    }
+
+    .pricing-features li {
+      padding: 8px 0;
+      font-size: 14px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .pricing-features li::before {
+      content: '✓';
+      color: var(--accent-green);
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .pricing-card .btn {
+      width: 100%;
+      justify-content: center;
+    }
+
+    /* ── FAQ ── */
+    .faq-section {
+      padding: 120px 0;
+    }
+
+    .faq-header {
+      text-align: center;
+      margin-bottom: 64px;
+    }
+
+    .faq-header .section-subtitle {
+      margin: 0 auto;
+    }
+
+    .faq-list {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .faq-item {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 12px;
+      overflow: hidden;
+      transition: all 0.3s;
+    }
+
+    .faq-item:hover {
+      border-color: var(--accent);
+    }
+
+    .faq-item.open {
+      border-color: var(--accent);
+      background: var(--bg-card);
+    }
+
+    .faq-question {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 15px;
+      transition: color 0.2s;
+      user-select: none;
+    }
+
+    .faq-question:hover {
+      color: var(--accent-light);
+    }
+
+    .faq-chevron {
+      font-size: 18px;
+      transition: transform 0.3s;
+      color: var(--text-muted);
+    }
+
+    .faq-item.open .faq-chevron {
+      transform: rotate(180deg);
+      color: var(--accent-light);
+    }
+
+    .faq-answer {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.35s ease, padding 0.35s ease;
+    }
+
+    .faq-item.open .faq-answer {
+      max-height: 200px;
+      padding: 0 24px 20px;
+    }
+
+    .faq-answer p {
+      color: var(--text-secondary);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    /* ── ABOUT ── */
+    .about-section {
+      padding: 120px 0;
+    }
+
+    .about-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      align-items: center;
+    }
+
+    .about-text .section-title {
+      font-size: 36px;
+    }
+
+    .about-text p {
+      color: var(--text-secondary);
+      font-size: 16px;
+      line-height: 1.8;
+      margin-bottom: 16px;
+    }
+
+    .team-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+    }
+
+    .team-member {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      text-align: center;
+      transition: all 0.3s;
+    }
+
+    .team-member:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+
+    .team-avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      margin: 0 auto 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+    }
+
+    .team-member h4 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .team-member p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* ── CTA ── */
+    .cta-section {
+      padding: 120px 0;
+      text-align: center;
+    }
+
+    .cta-box {
+      background: linear-gradient(135deg, #161938 0%, #1a1545 100%);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      padding: 80px 40px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cta-box::before {
+      content: '';
+      position: absolute;
+      top: -100px;
+      right: -100px;
+      width: 300px;
+      height: 300px;
+      background: radial-gradient(circle, rgba(253,121,168,0.1) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .cta-box::after {
+      content: '';
+      position: absolute;
+      bottom: -100px;
+      left: -100px;
+      width: 300px;
+      height: 300px;
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .cta-box h2 {
+      font-size: 44px;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      margin-bottom: 16px;
+      position: relative;
+    }
+
+    .cta-box p {
+      color: var(--text-secondary);
+      font-size: 18px;
+      margin-bottom: 40px;
+      position: relative;
+    }
+
+    .cta-box .hero-buttons {
+      position: relative;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 64px 0 40px;
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 48px;
+      margin-bottom: 48px;
+    }
+
+    .footer-brand .logo {
+      margin-bottom: 16px;
+    }
+
+    .footer-brand p {
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.7;
+      max-width: 280px;
+    }
+
+    .footer-col h4 {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+    }
+
+    .footer-col a {
+      display: block;
+      font-size: 14px;
+      color: var(--text-muted);
+      padding: 6px 0;
+      transition: color 0.2s;
+    }
+
+    .footer-col a:hover {
+      color: var(--text-primary);
+    }
+
+    .footer-bottom {
+      border-top: 1px solid var(--border);
+      padding-top: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* ── ANIMATIONS ── */
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+
+    .float { animation: float 4s ease-in-out infinite; }
+
+    @keyframes fade-in-up {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .animate-in {
+      animation: fade-in-up 0.6s ease forwards;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── NAV ── -->
+  <nav>
+    <div class="container nav-inner">
+      <a href="/demo/" class="logo">
+        <div class="logo-icon">F</div>
+        Flowboard
+      </a>
+      <div class="nav-links">
+        <a href="#features" data-testid="nav-features">Features</a>
+        <a href="/demo/features.html" data-testid="nav-features-page">All Features</a>
+        <a href="#pricing" data-testid="nav-pricing">Pricing</a>
+        <a href="#about">About</a>
+        <a href="#" class="nav-cta btn btn-primary" data-testid="hero-cta">Get Started</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── HERO ── -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">
+        <span>New</span>
+        AI-powered sprint planning is here
+      </div>
+      <h1>
+        Ship projects<br><span class="gradient">faster, together.</span>
+      </h1>
+      <p>The project management platform that gets out of your way. Plan sprints, track issues, and ship features — all in one place.</p>
+      <div class="hero-buttons">
+        <a href="#" class="btn btn-primary btn-lg" data-testid="hero-cta-main">Start free trial</a>
+        <a href="#" class="btn btn-secondary btn-lg">Watch demo →</a>
+      </div>
+
+      <!-- Dashboard mockup -->
+      <div class="dashboard-mockup float">
+        <div class="mockup-toolbar">
+          <div class="mockup-dot red"></div>
+          <div class="mockup-dot yellow"></div>
+          <div class="mockup-dot green"></div>
+        </div>
+        <div class="mockup-body">
+          <div class="mockup-sidebar">
+            <div class="mockup-sidebar-item active">Board</div>
+            <div class="mockup-sidebar-item">Backlog</div>
+            <div class="mockup-sidebar-item">Timeline</div>
+            <div class="mockup-sidebar-item">Reports</div>
+            <div class="mockup-sidebar-item">Settings</div>
+          </div>
+          <div class="mockup-content">
+            <div class="mockup-columns">
+              <div>
+                <div class="mockup-col-title">To Do</div>
+                <div class="mockup-card">
+                  <div class="mockup-card-tag tag-purple">Design</div>
+                  <div>Update onboarding flow</div>
+                </div>
+                <div class="mockup-card">
+                  <div class="mockup-card-tag tag-green">Backend</div>
+                  <div>API rate limiting</div>
+                </div>
+              </div>
+              <div>
+                <div class="mockup-col-title">In Progress</div>
+                <div class="mockup-card">
+                  <div class="mockup-card-tag tag-pink">Bug</div>
+                  <div>Fix auth token refresh</div>
+                </div>
+                <div class="mockup-card">
+                  <div class="mockup-card-tag tag-purple">Design</div>
+                  <div>Dark mode support</div>
+                </div>
+              </div>
+              <div>
+                <div class="mockup-col-title">Done</div>
+                <div class="mockup-card">
+                  <div class="mockup-card-tag tag-green">Backend</div>
+                  <div>Webhook integrations</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── LOGOS ── -->
+  <section class="logos-section">
+    <div class="container">
+      <p>Trusted by teams at</p>
+      <div class="logos-grid">
+        <div class="fake-logo">Stripe</div>
+        <div class="fake-logo">Vercel</div>
+        <div class="fake-logo">Linear</div>
+        <div class="fake-logo">Notion</div>
+        <div class="fake-logo">Figma</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FEATURES ── -->
+  <section id="features" class="features-section">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-label">Features</div>
+        <h2 class="section-title">Everything you need<br>to ship on time.</h2>
+        <p class="section-subtitle">Built for modern engineering teams who care about velocity and developer experience.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card" id="feature-board">
+          <div class="feature-icon icon-purple">📋</div>
+          <h3>Smart Kanban Boards</h3>
+          <p>Drag-and-drop boards with AI-powered ticket assignment. Automatically suggests priority and assignees based on past sprints.</p>
+        </div>
+        <div class="feature-card" id="feature-timeline">
+          <div class="feature-icon icon-green">📊</div>
+          <h3>Visual Timeline</h3>
+          <p>See your entire project on a Gantt-style timeline. Dependencies are tracked automatically and blockers surface instantly.</p>
+        </div>
+        <div class="feature-card" id="feature-integrations">
+          <div class="feature-icon icon-pink">🔗</div>
+          <h3>Deep Integrations</h3>
+          <p>Connect with GitHub, GitLab, Slack, Figma, and 50+ tools. Two-way sync keeps everything up to date without lifting a finger.</p>
+        </div>
+        <div class="feature-card" id="feature-ai">
+          <div class="feature-icon icon-blue">🤖</div>
+          <h3>AI Sprint Planner</h3>
+          <p>Let AI analyze your team's velocity and suggest optimal sprint compositions. Hit your deadlines with data-driven planning.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PRICING ── -->
+  <section id="pricing" class="pricing-section">
+    <div class="container">
+      <div class="pricing-header">
+        <div class="section-label">Pricing</div>
+        <h2 class="section-title">Simple, transparent pricing.</h2>
+        <p class="section-subtitle">Start free. Upgrade when your team is ready.</p>
+        <div class="pricing-toggle-wrapper">
+          <span class="pricing-toggle-label monthly-label active">Monthly</span>
+          <div class="pricing-toggle" data-testid="pricing-toggle" id="pricing-toggle" role="switch" aria-checked="false" tabindex="0">
+            <div class="pricing-toggle-knob"></div>
+          </div>
+          <span class="pricing-toggle-label yearly-label">Yearly</span>
+          <span class="save-badge">Save 20%</span>
+        </div>
+      </div>
+
+      <div class="pricing-grid">
+        <!-- Free -->
+        <div class="pricing-card" id="pricing-free">
+          <h3>Free</h3>
+          <p class="description">For individuals and small side projects.</p>
+          <div class="price">
+            <span class="currency">$</span>0<span class="period"> /mo</span>
+          </div>
+          <ul class="pricing-features">
+            <li>Up to 3 projects</li>
+            <li>Basic Kanban board</li>
+            <li>GitHub integration</li>
+            <li>Community support</li>
+          </ul>
+          <a href="#" class="btn btn-secondary">Get started free</a>
+        </div>
+
+        <!-- Pro -->
+        <div class="pricing-card featured" data-testid="pricing-pro" id="pricing-pro">
+          <div class="pricing-popular">Most Popular</div>
+          <h3>Pro</h3>
+          <p class="description">For growing teams who need more power.</p>
+          <div class="price" data-testid="pro-price">
+            <span class="currency">$</span><span class="price-amount">29</span><span class="period"> /mo</span>
+          </div>
+          <ul class="pricing-features">
+            <li>Unlimited projects</li>
+            <li>AI sprint planner</li>
+            <li>All integrations</li>
+            <li>Visual timeline</li>
+            <li>Priority support</li>
+          </ul>
+          <a href="#" class="btn btn-primary">Start 14-day trial</a>
+        </div>
+
+        <!-- Enterprise -->
+        <div class="pricing-card" id="pricing-enterprise">
+          <h3>Enterprise</h3>
+          <p class="description">For organizations with advanced needs.</p>
+          <div class="price">
+            <span class="currency">$</span><span class="price-amount">79</span><span class="period"> /mo</span>
+          </div>
+          <ul class="pricing-features">
+            <li>Everything in Pro</li>
+            <li>SSO / SAML</li>
+            <li>Audit logs</li>
+            <li>Custom workflows</li>
+            <li>Dedicated CSM</li>
+            <li>99.99% SLA</li>
+          </ul>
+          <a href="#" class="btn btn-secondary">Contact sales</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FAQ ── -->
+  <section class="faq-section">
+    <div class="container">
+      <div class="faq-header">
+        <div class="section-label">FAQ</div>
+        <h2 class="section-title">Frequently asked questions</h2>
+        <p class="section-subtitle">Can't find what you're looking for? Reach out to our support team.</p>
+      </div>
+      <div class="faq-list">
+        <div class="faq-item" data-testid="faq-item-1" id="faq-1">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            How does the 14-day trial work?
+            <span class="faq-chevron">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Start your trial instantly — no credit card required. You get full access to all Pro features for 14 days. At the end of your trial, choose a plan or continue on our free tier.</p>
+          </div>
+        </div>
+        <div class="faq-item" data-testid="faq-item-2" id="faq-2">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            Can I import from Jira or Asana?
+            <span class="faq-chevron">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Yes! We have one-click importers for Jira, Asana, Trello, Linear, and Monday.com. Your data, issues, and history are migrated automatically in minutes.</p>
+          </div>
+        </div>
+        <div class="faq-item" data-testid="faq-item-3" id="faq-3">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            Is my data secure?
+            <span class="faq-chevron">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Absolutely. We're SOC 2 Type II certified and GDPR compliant. All data is encrypted at rest and in transit. Enterprise plans include dedicated infrastructure.</p>
+          </div>
+        </div>
+        <div class="faq-item" data-testid="faq-item-4" id="faq-4">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            What integrations are available?
+            <span class="faq-chevron">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>We integrate with 50+ tools including GitHub, GitLab, Slack, Figma, VS Code, Discord, Notion, and more. Our API and webhooks let you build custom integrations too.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── ABOUT ── -->
+  <section id="about" class="about-section">
+    <div class="container">
+      <div class="about-grid">
+        <div class="about-text">
+          <div class="section-label">About</div>
+          <h2 class="section-title">Built by developers,<br>for developers.</h2>
+          <p>We started Flowboard after years of frustration with bloated project management tools. We believe project tracking should feel as fast as your IDE — instant, keyboard-driven, and beautiful.</p>
+          <p>Based in San Francisco, our team of 32 is building the future of how engineering teams ship software.</p>
+        </div>
+        <div class="team-grid">
+          <div class="team-member">
+            <div class="team-avatar" style="background: rgba(108,92,231,0.15);">👩‍💻</div>
+            <h4>Sarah Chen</h4>
+            <p>CEO & Co-founder</p>
+          </div>
+          <div class="team-member">
+            <div class="team-avatar" style="background: rgba(0,206,201,0.15);">👨‍💻</div>
+            <h4>Marcus Rivera</h4>
+            <p>CTO & Co-founder</p>
+          </div>
+          <div class="team-member">
+            <div class="team-avatar" style="background: rgba(253,121,168,0.15);">🎨</div>
+            <h4>Aisha Patel</h4>
+            <p>Head of Design</p>
+          </div>
+          <div class="team-member">
+            <div class="team-avatar" style="background: rgba(116,185,255,0.15);">🛠</div>
+            <h4>Erik Larsson</h4>
+            <p>Lead Engineer</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CTA ── -->
+  <section class="cta-section">
+    <div class="container">
+      <div class="cta-box">
+        <h2>Ready to ship faster?</h2>
+        <p>Join 12,000+ teams already using Flowboard.</p>
+        <div class="hero-buttons">
+          <a href="#" class="btn btn-primary btn-lg">Start your free trial</a>
+          <a href="#" class="btn btn-secondary btn-lg">Talk to sales</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FOOTER ── -->
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="logo">
+            <div class="logo-icon">F</div>
+            Flowboard
+          </div>
+          <p>The project management tool built for teams that ship fast.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Product</h4>
+          <a href="#features">Features</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#">Integrations</a>
+          <a href="#">Changelog</a>
+        </div>
+        <div class="footer-col">
+          <h4>Company</h4>
+          <a href="#about">About</a>
+          <a href="#">Blog</a>
+          <a href="#">Careers</a>
+          <a href="#">Press</a>
+        </div>
+        <div class="footer-col">
+          <h4>Resources</h4>
+          <a href="#">Documentation</a>
+          <a href="#">API Reference</a>
+          <a href="#">Status</a>
+          <a href="#">Support</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>&copy; 2026 Flowboard, Inc. All rights reserved.</span>
+        <span>
+          <a href="#">Privacy</a> &nbsp;·&nbsp; <a href="#">Terms</a>
+        </span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // FAQ toggle
+    function toggleFaq(el) {
+      const item = el.closest('.faq-item');
+      const wasOpen = item.classList.contains('open');
+      // Close all
+      document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+      // Toggle clicked
+      if (!wasOpen) item.classList.add('open');
+    }
+
+    // Pricing toggle
+    const toggle = document.getElementById('pricing-toggle');
+    const monthlyLabel = document.querySelector('.monthly-label');
+    const yearlyLabel = document.querySelector('.yearly-label');
+    const priceAmounts = document.querySelectorAll('.price-amount');
+    const monthlyPrices = { 'pricing-pro': '24', 'pricing-enterprise': '79' };
+    const yearlyPrices = { 'pricing-pro': '19', 'pricing-enterprise': '63' };
+
+    toggle.addEventListener('click', function() {
+      const isYearly = this.classList.toggle('yearly');
+      this.setAttribute('aria-checked', isYearly);
+      monthlyLabel.classList.toggle('active', !isYearly);
+      yearlyLabel.classList.toggle('active', isYearly);
+
+      const card1 = document.getElementById('pricing-pro');
+      const card2 = document.getElementById('pricing-enterprise');
+      const prices = isYearly ? yearlyPrices : monthlyPrices;
+
+      card1.querySelector('.price-amount').textContent = prices['pricing-pro'];
+      card2.querySelector('.price-amount').textContent = prices['pricing-enterprise'];
+    });
+
+    // Smooth scroll for nav links (backup for browsers without scroll-behavior)
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function(e) {
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          e.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth' });
+        }
+      });
+    });
+  </script>
+
+  <!-- Bugreel SDK -->
+  <script src="/sdk/recorder.js" data-endpoint="http://localhost:7777/api/ingest?token=breel_a478b86576ffbdf9336e008ddd508f73d25921caf246dce0"></script>
+</body>
+</html>

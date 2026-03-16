@@ -1,9 +1,9 @@
 import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
 import { db } from '~/server/utils/db'
 import { isEmailEnabled } from '~/server/utils/email'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'bugreel-dev-secret'
+import { signUserToken } from '~/server/utils/jwt'
+import { checkRateLimit } from '~/server/utils/rate-limit'
+import { isValidEmail } from '~/server/utils/validate'
 
 interface UserRow {
   id: string
@@ -14,11 +14,17 @@ interface UserRow {
 }
 
 export default defineEventHandler(async (event) => {
+  checkRateLimit(event, { windowMs: 60_000, max: 10 })
+
   const body = await readBody(event)
   const { email, password } = body || {}
 
   if (!email || !password) {
     throw createError({ statusCode: 400, message: 'Email and password are required' })
+  }
+
+  if (typeof email !== 'string' || !isValidEmail(email)) {
+    throw createError({ statusCode: 400, message: 'Invalid email address' })
   }
 
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase()) as UserRow | undefined
@@ -37,7 +43,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, message: 'Please verify your email before logging in.' })
   }
 
-  const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' })
+  const token = signUserToken({ id: user.id, email: user.email }, event)
 
   return {
     token,

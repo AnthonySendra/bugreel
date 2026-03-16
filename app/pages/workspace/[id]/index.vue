@@ -1,7 +1,4 @@
 <script setup lang="ts">
-import { h, resolveComponent } from 'vue'
-import type { TableColumn } from '@nuxt/ui'
-
 definePageMeta({ middleware: 'auth', layout: 'workspace' })
 
 const route = useRoute()
@@ -13,21 +10,67 @@ const headers = computed(() =>
 )
 
 interface App { id: string; name: string; created_at: number }
-interface ApiToken { id: string; name: string; created_at: number; created_by_email: string | null }
-
 interface Member { id: string; email: string; created_at: number }
 
+interface Workspace { id: string; name: string }
+
+const { data: workspaces } = await useFetch<Workspace[]>('/api/workspaces', { headers })
+const workspace = computed(() => workspaces.value?.find(w => w.id === workspaceId))
+
 const { data: apps, refresh: refreshApps } = await useFetch<App[]>(`/api/workspaces/${workspaceId}/apps`, { headers })
-const { data: apiTokens, refresh: refreshTokens } = await useFetch<ApiToken[]>(`/api/workspaces/${workspaceId}/tokens`, { headers })
 const { data: members, refresh: refreshMembers } = await useFetch<Member[]>(`/api/workspaces/${workspaceId}/members`, { headers })
 
+// ── Rename workspace ─────────────────────────────────────────────────────────
+const editWsName = ref('')
+const editWsLoading = ref(false)
+const editWsSaved = ref(false)
+
+watch(workspace, (ws) => {
+  if (ws && !editWsName.value) editWsName.value = ws.name
+}, { immediate: true })
+
+async function renameWorkspace() {
+  if (!editWsName.value.trim() || editWsLoading.value) return
+  editWsLoading.value = true
+  editWsSaved.value = false
+  try {
+    await $fetch(`/api/workspaces/${workspaceId}`, {
+      method: 'PATCH',
+      headers: headers.value,
+      body: { name: editWsName.value.trim() },
+    })
+    editWsSaved.value = true
+    // Refresh workspace list in layout
+    await refreshNuxtData()
+    setTimeout(() => { editWsSaved.value = false }, 2000)
+  } finally {
+    editWsLoading.value = false
+  }
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────────
-const activeTab = ref('apps')
+const validTabs = ['apps', 'team', 'settings'] as const
+const initialTab = validTabs.includes(route.hash.slice(1) as any) ? route.hash.slice(1) : 'apps'
+const activeTab = ref(initialTab)
+
+watch(activeTab, (tab) => {
+  const hash = tab === 'apps' ? '' : `#${tab}`
+  navigateTo({ hash }, { replace: true })
+})
+
 const tabs = [
-  { key: 'apps', label: 'Applications' },
-  { key: 'team', label: 'Team' },
-  { key: 'settings', label: 'Settings' },
+  { key: 'apps', label: 'Applications', icon: 'i-lucide-layout-grid' },
+  { key: 'team', label: 'Team', icon: 'i-lucide-users' },
+  { key: 'settings', label: 'Settings', icon: 'i-lucide-settings' },
 ]
+
+// ── Onboarding state ─────────────────────────────────────────────────────────
+const hasApps = computed(() => (apps.value?.length || 0) > 0)
+const onboardingStep = computed(() => {
+  if (!hasApps.value) return 2
+  return 3
+})
+const showOnboarding = computed(() => onboardingStep.value <= 3)
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function timeAgo(ts: number) {
@@ -40,10 +83,6 @@ function timeAgo(ts: number) {
   if (m > 0) return `${m}m ago`
   return 'just now'
 }
-function formatDate(ts: number) {
-  return new Date(ts).toLocaleString()
-}
-
 // ── New app modal ─────────────────────────────────────────────────────────────
 const newAppModalOpen = ref(false)
 const newAppName = ref('')
@@ -76,106 +115,27 @@ function closeNewAppModal() {
   newAppError.value = ''
 }
 
-// ── Tokens ────────────────────────────────────────────────────────────────────
-interface TokenRow { id: string; name: string; date: string; createdBy: string }
+// ── Delete workspace ─────────────────────────────────────────────────────────
+const deleteWsModalOpen = ref(false)
+const deleteWsLoading = ref(false)
+const deleteWsConfirm = ref('')
 
-const tokenRows = computed<TokenRow[]>(() =>
-  (apiTokens.value || []).map(t => ({
-    id: t.id,
-    name: t.name,
-    date: formatDate(t.created_at),
-    createdBy: t.created_by_email || '—',
-  }))
-)
-
-const UButton = resolveComponent('UButton')
-
-const tokenColumns: TableColumn<TokenRow>[] = [
-  { accessorKey: 'name', header: 'Name' },
-  { accessorKey: 'createdBy', header: 'Created by' },
-  { accessorKey: 'date', header: 'Created' },
-  {
-    id: 'actions',
-    header: '',
-    cell: ({ row }) => h(UButton, {
-      icon: 'i-lucide-trash-2',
-      size: 'xs',
-      color: 'error',
-      variant: 'ghost',
-      onClick: () => confirmDeleteToken(row.original),
-    }),
-  },
-]
-
-const tokenModalOpen = ref(false)
-const newTokenName = ref('')
-const newTokenLoading = ref(false)
-const newTokenError = ref('')
-const createdToken = ref<string | null>(null)
-const copiedToken = ref(false)
-const copiedUrlAppId = ref<string | null>(null)
-
-const origin = import.meta.client ? window.location.origin : ''
-
-function connectUrl(appId: string, token: string) {
-  return `${origin}/api/apps/${appId}/reels?token=${token}`
-}
-
-async function copyUrl(appId: string, url: string) {
-  await navigator.clipboard.writeText(url)
-  copiedUrlAppId.value = appId
-  setTimeout(() => { copiedUrlAppId.value = null }, 2000)
-}
-
-async function createToken() {
-  if (!newTokenName.value.trim()) return
-  newTokenLoading.value = true
-  newTokenError.value = ''
+async function deleteWorkspace() {
+  deleteWsLoading.value = true
   try {
-    const data = await $fetch<{ id: string; name: string; token: string; created_at: number }>(
-      `/api/workspaces/${workspaceId}/tokens`,
-      { method: 'POST', body: { name: newTokenName.value }, headers: headers.value }
-    )
-    createdToken.value = data.token
-    newTokenName.value = ''
-    await refreshTokens()
-  } catch (e: any) {
-    newTokenError.value = e?.data?.message || 'Failed to create token'
-  } finally {
-    newTokenLoading.value = false
-  }
-}
-
-const deleteModalOpen = ref(false)
-const tokenToDelete = ref<TokenRow | null>(null)
-const deleteLoading = ref(false)
-
-function confirmDeleteToken(row: TokenRow) {
-  tokenToDelete.value = row
-  deleteModalOpen.value = true
-}
-
-async function deleteToken() {
-  if (!tokenToDelete.value) return
-  deleteLoading.value = true
-  try {
-    await $fetch(`/api/workspaces/${workspaceId}/tokens/${tokenToDelete.value.id}`, {
+    await $fetch(`/api/workspaces/${workspaceId}`, {
       method: 'DELETE',
       headers: headers.value,
     })
-    deleteModalOpen.value = false
-    tokenToDelete.value = null
-    await refreshTokens()
+    await navigateTo('/dashboard')
   } finally {
-    deleteLoading.value = false
+    deleteWsLoading.value = false
   }
 }
 
-function closeTokenModal() {
-  tokenModalOpen.value = false
-  createdToken.value = null
-  newTokenName.value = ''
-  newTokenError.value = ''
+function closeDeleteWsModal() {
+  deleteWsModalOpen.value = false
+  deleteWsConfirm.value = ''
 }
 
 // ── Team ──────────────────────────────────────────────────────────────────────
@@ -217,81 +177,120 @@ async function removeMember(userId: string) {
   }
 }
 
-async function copyToken(val: string) {
-  await navigator.clipboard.writeText(val)
-  copiedToken.value = true
-  setTimeout(() => { copiedToken.value = false }, 2000)
-}
 </script>
 
 <template>
-  <div class="flex flex-col flex-1">
+  <div class="flex flex-col flex-1 ws-page">
 
     <!-- Tab bar -->
-    <nav class="border-b border-(--ui-border) px-6 flex gap-0">
+    <nav class="tab-bar">
       <button
         v-for="tab in tabs"
         :key="tab.key"
-        class="py-4 px-1 mr-6 text-sm font-medium border-b-2 -mb-px transition-colors"
-        :class="activeTab === tab.key
-          ? 'border-white text-white'
-          : 'border-transparent text-(--ui-text-muted) hover:text-(--ui-text)'"
+        class="tab-btn"
+        :class="{ 'tab-active': activeTab === tab.key }"
         @click="activeTab = tab.key"
       >
+        <UIcon :name="tab.icon" class="w-4 h-4" />
         {{ tab.label }}
       </button>
     </nav>
 
     <!-- Content -->
-    <div class="flex-1 px-10 py-10 w-full max-w-6xl mx-auto">
+    <div class="flex-1 px-10 py-8 w-full max-w-5xl mx-auto">
+
+      <!-- ── Onboarding banner ── -->
+      <div v-if="showOnboarding" class="onboard-banner">
+        <div class="onboard-progress">
+          <div class="onboard-progress-fill" :style="{ width: `${((onboardingStep - 1) / 3) * 100}%` }" />
+        </div>
+        <div class="onboard-body">
+          <div class="onboard-left">
+            <p class="onboard-label">Getting started</p>
+            <h3 class="onboard-heading">
+              <template v-if="onboardingStep === 2">Create your first application</template>
+              <template v-else>Generate an API token</template>
+            </h3>
+            <p class="onboard-desc">
+              <template v-if="onboardingStep === 2">An application is where your recorded reels will appear. Think of it as a project.</template>
+              <template v-else>Open your app and go to the <strong class="text-white">API Tokens</strong> tab to create a token, then use it with the browser extension or SDK.</template>
+            </p>
+          </div>
+          <div class="onboard-actions">
+            <UButton
+              v-if="onboardingStep === 2"
+              label="Create app"
+              icon="i-lucide-plus"
+              @click="newAppModalOpen = true"
+            />
+            <UButton
+              v-else-if="apps?.length"
+              label="Go to app"
+              icon="i-lucide-key-round"
+              @click="navigateTo(`/workspace/${workspaceId}/app/${apps[0].id}#tokens`)"
+            />
+          </div>
+        </div>
+        <div class="onboard-steps-row">
+          <div
+            v-for="s in 3"
+            :key="s"
+            class="onboard-dot"
+            :class="{ 'dot-done': s < onboardingStep, 'dot-current': s === onboardingStep }"
+          />
+        </div>
+      </div>
 
       <!-- ── Applications tab ── -->
       <template v-if="activeTab === 'apps'">
-        <h1 class="text-2xl font-bold text-(--ui-text-highlighted) mb-6">Applications</h1>
+        <div class="section-header">
+          <h1 class="section-title">Applications</h1>
+          <UButton label="New app" icon="i-lucide-plus" size="sm" @click="newAppModalOpen = true" />
+        </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+        <div v-if="!hasApps" class="empty-state">
+          <div class="empty-icon">
+            <UIcon name="i-lucide-layout-grid" class="w-8 h-8" />
+          </div>
+          <p class="empty-title">No applications yet</p>
+          <p class="empty-desc">Create your first app to start collecting bug recordings.</p>
+          <UButton label="Create application" icon="i-lucide-plus" class="mt-4" @click="newAppModalOpen = true" />
+        </div>
 
-          <!-- Create app card -->
-          <button
-            class="h-24 rounded-lg border-2 border-dashed border-(--ui-border) hover:border-(--ui-border-accented) flex items-center justify-center gap-2 transition-colors group cursor-pointer"
-            @click="newAppModalOpen = true"
-          >
-            <UIcon name="i-lucide-plus" class="w-4 h-4 text-(--ui-text-muted)" />
-            <span class="text-sm text-(--ui-text-muted) group-hover:text-(--ui-text) transition-colors">Create application</span>
-          </button>
-
-          <!-- App cards -->
+        <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <button
             v-for="app in apps"
             :key="app.id"
-            class="h-24 rounded-lg border border-(--ui-border) bg-(--ui-bg-elevated) hover:border-(--ui-border-accented) flex flex-col overflow-hidden transition-all cursor-pointer text-left group"
+            class="app-card group"
             @click="navigateTo(`/workspace/${workspaceId}/app/${app.id}`)"
           >
-            <div class="h-0.5 w-full bg-gradient-to-r from-primary-500 to-primary-400" />
-            <div class="flex-1 px-4 flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-(--ui-bg-accented) border border-(--ui-border) flex items-center justify-center shrink-0">
-                <UIcon name="i-lucide-layout-grid" class="w-4 h-4 text-(--ui-text-muted)" />
+            <div class="app-card-accent" />
+            <div class="app-card-body">
+              <div class="app-card-icon">
+                <UIcon name="i-lucide-box" class="w-4.5 h-4.5 text-bugreel-400" />
               </div>
-              <div class="space-y-0.5 min-w-0">
-                <p class="text-sm font-semibold text-(--ui-text-highlighted) group-hover:text-white transition-colors truncate">
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-semibold text-white group-hover:text-bugreel-400 transition-colors truncate">
                   {{ app.name }}
                 </p>
-                <p class="text-xs text-(--ui-text-dimmed)">{{ timeAgo(app.created_at) }}</p>
+                <p class="text-xs text-(--ui-text-dimmed) mt-0.5">{{ timeAgo(app.created_at) }}</p>
               </div>
+              <UIcon name="i-lucide-chevron-right" class="w-4 h-4 text-(--ui-text-dimmed) opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
             </div>
           </button>
-
         </div>
       </template>
 
       <!-- ── Team tab ── -->
       <template v-if="activeTab === 'team'">
-        <div class="space-y-6">
+        <div class="section-header">
           <div>
-            <h2 class="text-2xl font-bold text-(--ui-text-highlighted) mb-1">Team</h2>
-            <p class="text-sm text-(--ui-text-muted)">Manage who has access to this workspace.</p>
+            <h1 class="section-title">Team</h1>
+            <p class="text-sm text-(--ui-text-muted) mt-1">Manage who has access to this workspace.</p>
           </div>
+        </div>
 
+        <div class="space-y-5">
           <!-- Add member -->
           <div class="flex gap-2">
             <UInput
@@ -305,24 +304,24 @@ async function copyToken(val: string) {
           <UAlert v-if="inviteError" color="error" variant="soft" :description="inviteError" />
 
           <!-- Members list -->
-          <div class="rounded-xl border border-(--ui-border) divide-y divide-(--ui-border) overflow-hidden">
+          <div class="members-list">
             <!-- Owner -->
-            <div class="flex items-center gap-3 px-4 py-3 bg-(--ui-bg-elevated)">
-              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center shrink-0">
-                <span class="text-white text-xs font-bold">{{ currentUser?.email?.[0]?.toUpperCase() }}</span>
+            <div class="member-row">
+              <div class="member-avatar member-avatar-owner">
+                <span>{{ currentUser?.email?.[0]?.toUpperCase() }}</span>
               </div>
               <span class="text-sm text-(--ui-text) flex-1">{{ currentUser?.email }}</span>
-              <span class="text-xs text-(--ui-text-dimmed) bg-(--ui-bg-accented) px-2 py-0.5 rounded-full">Owner</span>
+              <span class="member-badge">Owner</span>
             </div>
 
             <!-- Members -->
             <div
               v-for="member in members"
               :key="member.id"
-              class="flex items-center gap-3 px-4 py-3 hover:bg-(--ui-bg-elevated)/50 transition-colors group"
+              class="member-row group"
             >
-              <div class="w-8 h-8 rounded-full bg-(--ui-bg-accented) border border-(--ui-border) flex items-center justify-center shrink-0">
-                <span class="text-xs font-medium text-(--ui-text-muted)">{{ member.email[0].toUpperCase() }}</span>
+              <div class="member-avatar">
+                <span>{{ member.email[0].toUpperCase() }}</span>
               </div>
               <span class="text-sm text-(--ui-text) flex-1">{{ member.email }}</span>
               <UButton
@@ -330,14 +329,14 @@ async function copyToken(val: string) {
                 size="xs"
                 color="error"
                 variant="ghost"
-                class="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                class="opacity-0 group-hover:opacity-100 transition-opacity"
                 :loading="removingMemberId === member.id"
                 @click="removeMember(member.id)"
               />
             </div>
 
             <!-- Empty -->
-            <div v-if="!members?.length" class="px-4 py-6 text-center text-sm text-(--ui-text-muted)">
+            <div v-if="!members?.length" class="px-4 py-8 text-center text-sm text-(--ui-text-muted)">
               No members yet. Add teammates by email above.
             </div>
           </div>
@@ -348,29 +347,48 @@ async function copyToken(val: string) {
       <template v-if="activeTab === 'settings'">
         <div class="space-y-10">
 
-          <!-- API Tokens -->
+          <!-- General -->
           <div>
-            <div class="flex items-start justify-between mb-5">
+            <div class="section-header">
               <div>
-                <h2 class="text-lg font-semibold text-(--ui-text-highlighted)">API Tokens</h2>
-                <p class="text-sm text-(--ui-text-muted) mt-1">
-                  Tokens allow the browser extension to push recordings to this workspace.
-                </p>
+                <h2 class="section-title text-lg!">General</h2>
+                <p class="text-sm text-(--ui-text-muted) mt-1">Workspace settings and identity.</p>
               </div>
-              <UButton label="New token" icon="i-lucide-plus" size="sm" @click="tokenModalOpen = true" />
             </div>
-
-            <div v-if="tokenRows.length === 0" class="text-sm text-(--ui-text-muted) py-8 text-center border border-dashed border-(--ui-border) rounded-xl">
-              No API tokens yet.
+            <div class="settings-card space-y-4">
+              <div>
+                <label class="settings-label">Workspace ID</label>
+                <code class="settings-code">{{ workspaceId }}</code>
+              </div>
+              <div>
+                <label class="settings-label">Workspace name</label>
+                <div class="flex items-center gap-2">
+                  <UInput v-model="editWsName" placeholder="Workspace name" class="flex-1" @keyup.enter="renameWorkspace" />
+                  <UButton
+                    :label="editWsSaved ? 'Saved' : 'Save'"
+                    :icon="editWsSaved ? 'i-lucide-check' : undefined"
+                    size="sm"
+                    :loading="editWsLoading"
+                    :disabled="!editWsName.trim() || editWsName.trim() === workspace?.name"
+                    @click="renameWorkspace"
+                  />
+                </div>
+              </div>
             </div>
-            <UTable v-else :data="tokenRows" :columns="tokenColumns" />
           </div>
 
-          <!-- Workspace ID -->
+          <!-- Danger zone -->
           <div>
-            <h2 class="text-lg font-semibold text-(--ui-text-highlighted) mb-1">Workspace ID</h2>
-            <p class="text-sm text-(--ui-text-muted) mb-3">Required in the extension alongside the API token.</p>
-            <code class="block text-sm font-mono bg-(--ui-bg-elevated) border border-(--ui-border) px-4 py-3 rounded-lg text-(--ui-text) break-all select-all">{{ workspaceId }}</code>
+            <h2 class="text-sm font-semibold text-red-400 mb-4">Danger zone</h2>
+            <div class="danger-zone">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-(--ui-text)">Delete this workspace</p>
+                  <p class="text-xs text-(--ui-text-dimmed) mt-0.5">All apps, reels, tokens, and members will be permanently deleted.</p>
+                </div>
+                <UButton label="Delete workspace" color="error" variant="soft" size="sm" icon="i-lucide-trash-2" @click="deleteWsModalOpen = true" />
+              </div>
+            </div>
           </div>
 
         </div>
@@ -395,71 +413,301 @@ async function copyToken(val: string) {
       </template>
     </UModal>
 
-    <!-- New token modal -->
-    <UModal v-model:open="tokenModalOpen" title="Create API token" @close="closeTokenModal">
+    <!-- Delete workspace modal -->
+    <UModal v-model:open="deleteWsModalOpen" title="Delete workspace" @close="closeDeleteWsModal">
       <template #body>
         <div class="space-y-4">
-          <div v-if="!createdToken" class="space-y-4">
-            <UFormField label="Token name" hint="e.g. Chrome extension, CI">
-              <UInput v-model="newTokenName" placeholder="My extension" autofocus class="w-full" @keyup.enter="createToken" />
-            </UFormField>
-            <UAlert v-if="newTokenError" color="error" variant="soft" :description="newTokenError" />
-          </div>
-          <div v-else class="space-y-4">
-            <UAlert color="warning" variant="soft" title="Save this token now" description="It won't be shown again after you close this dialog." />
-
-            <!-- Raw token -->
-            <div>
-              <p class="text-xs font-semibold text-(--ui-text-muted) uppercase tracking-wider mb-2">Token</p>
-              <div class="flex items-center gap-2">
-                <code class="flex-1 text-xs font-mono bg-(--ui-bg-elevated) border border-(--ui-border) px-3 py-2 rounded-lg break-all text-(--ui-text)">{{ createdToken }}</code>
-                <UButton :icon="copiedToken ? 'i-lucide-check' : 'i-lucide-copy'" size="sm" variant="outline" @click="copyToken(createdToken!)" />
-              </div>
-            </div>
-
-            <!-- Extension URLs per app -->
-            <div v-if="apps?.length">
-              <p class="text-xs font-semibold text-(--ui-text-muted) uppercase tracking-wider mb-2">Extension endpoint URLs</p>
-              <div class="space-y-2">
-                <div v-for="app in apps" :key="app.id" class="flex items-center gap-2">
-                  <span class="text-xs text-(--ui-text-dimmed) shrink-0 w-24 truncate" :title="app.name">{{ app.name }}</span>
-                  <code class="flex-1 text-xs font-mono bg-(--ui-bg-elevated) border border-(--ui-border) px-2 py-1.5 rounded-md text-(--ui-text-muted) truncate">{{ connectUrl(app.id, createdToken!) }}</code>
-                  <UButton
-                    :icon="copiedUrlAppId === app.id ? 'i-lucide-check' : 'i-lucide-copy'"
-                    size="xs"
-                    variant="ghost"
-                    class="shrink-0"
-                    @click="copyUrl(app.id, connectUrl(app.id, createdToken!))"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
+          <p class="text-sm text-(--ui-text-muted)">
+            This will permanently delete this workspace and <strong class="text-(--ui-text)">all its apps, reels, tokens, and members</strong>. This action cannot be undone.
+          </p>
+          <UFormField label="Type DELETE to confirm">
+            <UInput v-model="deleteWsConfirm" placeholder="DELETE" class="w-full" />
+          </UFormField>
         </div>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2 w-full">
-          <UButton label="Close" color="neutral" variant="outline" @click="closeTokenModal" />
-          <UButton v-if="!createdToken" label="Create" :loading="newTokenLoading" :disabled="!newTokenName.trim()" @click="createToken" />
+          <UButton label="Cancel" color="neutral" variant="outline" @click="closeDeleteWsModal" />
+          <UButton label="Delete forever" color="error" :loading="deleteWsLoading" :disabled="deleteWsConfirm !== 'DELETE'" @click="deleteWorkspace" />
         </div>
       </template>
     </UModal>
 
-    <!-- Delete token confirmation modal -->
-    <UModal v-model:open="deleteModalOpen" title="Delete API token">
-      <template #body>
-        <p class="text-sm text-(--ui-text-muted)">
-          Are you sure you want to delete the token
-          <span class="font-medium text-(--ui-text)">{{ tokenToDelete?.name }}</span>?
-          Any extension using it will stop working.
-        </p>
-      </template>
-      <template #footer>
-        <div class="flex justify-end gap-2 w-full">
-          <UButton label="Cancel" color="neutral" variant="outline" @click="deleteModalOpen = false" />
-          <UButton label="Delete" color="error" :loading="deleteLoading" @click="deleteToken" />
-        </div>
-      </template>
-    </UModal>
   </div>
 </template>
+
+<style scoped>
+/* ── Tab bar ── */
+.tab-bar {
+  border-bottom: 1px solid var(--ui-border);
+  padding: 0 1.5rem;
+  display: flex;
+  gap: 0;
+}
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 0.25rem;
+  margin-right: 1.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all 0.15s;
+  color: var(--ui-text-muted);
+}
+.tab-btn:hover {
+  color: var(--ui-text);
+}
+.tab-active {
+  border-bottom-color: #ff4070;
+  color: white;
+}
+
+/* ── Section headers ── */
+.section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+.section-title {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: white;
+  letter-spacing: -0.02em;
+}
+
+/* ── App cards ── */
+.app-card {
+  position: relative;
+  border: 1px solid var(--ui-border);
+  border-radius: 0.75rem;
+  background: var(--ui-bg-elevated);
+  overflow: hidden;
+  transition: all 0.2s;
+  text-align: left;
+}
+.app-card:hover {
+  border-color: var(--ui-border-accented);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+.app-card-accent {
+  height: 2px;
+  background: linear-gradient(90deg, #ff4070, #ff5888);
+}
+.app-card-body {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.125rem;
+}
+.app-card-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.625rem;
+  background: rgba(255, 64, 112, 0.1);
+  border: 1px solid rgba(255, 64, 112, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ── Members ── */
+.members-list {
+  border-radius: 0.75rem;
+  border: 1px solid var(--ui-border);
+  overflow: hidden;
+}
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  transition: background 0.15s;
+}
+.member-row:not(:last-child) {
+  border-bottom: 1px solid var(--ui-border);
+}
+.member-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+.member-avatar {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--ui-bg-accented);
+  border: 1px solid var(--ui-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.member-avatar span {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ui-text-muted);
+}
+.member-avatar-owner {
+  background: linear-gradient(135deg, #ff4070, #ed1050);
+  border: none;
+}
+.member-avatar-owner span {
+  color: white;
+}
+.member-badge {
+  font-size: 0.6875rem;
+  color: var(--ui-text-dimmed);
+  background: var(--ui-bg-accented);
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+}
+
+/* ── Empty states ── */
+.empty-state {
+  text-align: center;
+  padding: 4rem 2rem;
+  border: 1px dashed var(--ui-border);
+  border-radius: 1rem;
+}
+.empty-icon {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 1rem;
+  background: rgba(255, 64, 112, 0.08);
+  border: 1px solid rgba(255, 64, 112, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1rem;
+  color: var(--ui-text-dimmed);
+}
+.empty-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: white;
+}
+.empty-desc {
+  font-size: 0.8125rem;
+  color: var(--ui-text-muted);
+  margin-top: 0.25rem;
+}
+/* ── Onboarding banner ── */
+.onboard-banner {
+  border: 1px solid var(--ui-border);
+  border-radius: 0.875rem;
+  background: linear-gradient(135deg, rgba(255, 64, 112, 0.05) 0%, transparent 50%);
+  overflow: hidden;
+  margin-bottom: 2rem;
+}
+.onboard-progress {
+  height: 3px;
+  background: var(--ui-bg-accented);
+}
+.onboard-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff4070, #ff5888);
+  transition: width 0.5s ease;
+}
+.onboard-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1.25rem 1.5rem;
+}
+.onboard-left {
+  flex: 1;
+  min-width: 0;
+}
+.onboard-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #ff4070;
+  margin-bottom: 0.25rem;
+}
+.onboard-heading {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: white;
+}
+.onboard-desc {
+  font-size: 0.8125rem;
+  color: var(--ui-text-muted);
+  margin-top: 0.25rem;
+  line-height: 1.5;
+}
+.onboard-actions {
+  flex-shrink: 0;
+}
+.onboard-step-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ui-text-muted);
+  background: var(--ui-bg-elevated);
+  border: 1px solid var(--ui-border);
+  padding: 0.375rem 0.75rem;
+  border-radius: 9999px;
+}
+.onboard-steps-row {
+  display: flex;
+  gap: 0.375rem;
+  padding: 0 1.5rem 1rem;
+}
+.onboard-dot {
+  width: 2rem;
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: var(--ui-bg-accented);
+  transition: all 0.3s;
+}
+.dot-done {
+  background: #ff4070;
+}
+.dot-current {
+  background: rgba(255, 64, 112, 0.5);
+}
+
+/* ── Settings ── */
+.settings-card {
+  padding: 1.25rem;
+  border: 1px solid var(--ui-border);
+  border-radius: 0.5rem;
+  background: var(--ui-bg-elevated);
+}
+.settings-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ui-text-muted);
+  margin-bottom: 0.375rem;
+}
+.settings-code {
+  display: inline-block;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--ui-text-dimmed);
+  background: var(--ui-bg);
+  border: 1px solid var(--ui-border);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  user-select: all;
+}
+
+/* ── Danger zone ── */
+.danger-zone {
+  padding: 1rem 1.25rem;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 0.5rem;
+  background: rgba(239, 68, 68, 0.04);
+}
+</style>

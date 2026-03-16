@@ -1,12 +1,14 @@
 import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
 import { randomUUID, randomBytes } from 'crypto'
 import { db } from '~/server/utils/db'
 import { isEmailEnabled, sendVerificationEmail } from '~/server/utils/email'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'bugreel-dev-secret'
+import { signUserToken } from '~/server/utils/jwt'
+import { checkRateLimit } from '~/server/utils/rate-limit'
+import { isValidEmail } from '~/server/utils/validate'
 
 export default defineEventHandler(async (event) => {
+  checkRateLimit(event, { windowMs: 60_000, max: 5 })
+
   const body = await readBody(event)
   const { email, password } = body || {}
 
@@ -16,6 +18,10 @@ export default defineEventHandler(async (event) => {
 
   if (typeof email !== 'string' || typeof password !== 'string') {
     throw createError({ statusCode: 400, message: 'Invalid input' })
+  }
+
+  if (!isValidEmail(email)) {
+    throw createError({ statusCode: 400, message: 'Invalid email address' })
   }
 
   if (password.length < 6) {
@@ -54,7 +60,7 @@ export default defineEventHandler(async (event) => {
     await sendVerificationEmail(email.toLowerCase(), token)
   }
 
-  const jwtToken = jwt.sign({ id, email: email.toLowerCase() }, JWT_SECRET, { expiresIn: '30d' })
+  const jwtToken = signUserToken({ id, email: email.toLowerCase() }, event)
 
   return {
     token: jwtToken,

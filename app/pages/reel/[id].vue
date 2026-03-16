@@ -20,7 +20,6 @@ const playBtnEl = ref<HTMLElement | null>(null)
 const seekerEl = ref<HTMLInputElement | null>(null)
 const progressFillEl = ref<HTMLElement | null>(null)
 const timeDisplayEl = ref<HTMLElement | null>(null)
-const metaUrlEl = ref<HTMLElement | null>(null)
 const metaDateEl = ref<HTMLElement | null>(null)
 const consoleEntriesEl = ref<HTMLElement | null>(null)
 const consolePanelEl = ref<HTMLElement | null>(null)
@@ -30,7 +29,6 @@ const networkCountEl = ref<HTMLElement | null>(null)
 const interactionsCountEl = ref<HTMLElement | null>(null)
 const interactionsPanelEl = ref<HTMLElement | null>(null)
 const interactionsListEl = ref<HTMLElement | null>(null)
-const commentsCountEl = ref<HTMLElement | null>(null)
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const activeTab = ref<'console' | 'network' | 'interactions' | 'comments'>('console')
@@ -40,6 +38,23 @@ const openReplyId = ref<string | null>(null)
 const replyContent = ref('')
 const submitting = ref(false)
 const currentTimeDisplay = ref('0:00.0')
+const currentTimeMs = ref(0)
+const currentUrl = ref('')
+
+// ── Element pick mode (for linking comments to DOM elements) ──────────────────
+const pickModeActive = ref(false)
+const pinnedElement = ref<{
+  tag: string
+  id: string
+  classes: string
+  cssPath: string
+  displayLabel: string
+} | null>(null)
+
+let pickHighlightEl: HTMLDivElement | null = null
+let pickTooltipEl: HTMLDivElement | null = null
+let currentPickEl: Element | null = null
+let hoverHighlightEl: HTMLDivElement | null = null
 
 const commentThreads = computed(() => {
   const roots = comments.value.filter(c => !c.parent_id)
@@ -120,9 +135,9 @@ function initViewer() {
   const { consoleEvents = [], networkEvents = [], interactionEvents = [], meta = {} } = recording
 
   if (metaDateEl.value) metaDateEl.value.textContent = meta.recordedAt ? new Date(meta.recordedAt).toLocaleString() : ''
-  if (consoleCountEl.value) consoleCountEl.value.textContent = String(consoleEvents.length)
-  if (networkCountEl.value) networkCountEl.value.textContent = String(networkEvents.length)
-  if (interactionsCountEl.value) interactionsCountEl.value.textContent = String(interactionEvents.length)
+  if (consoleCountEl.value) consoleCountEl.value.textContent = fmtCount(consoleEvents.length)
+  if (networkCountEl.value) networkCountEl.value.textContent = fmtCount(networkEvents.length)
+  if (interactionsCountEl.value) interactionsCountEl.value.textContent = fmtCount(interactionEvents.length)
 
   // Raw events: used for duration (includes bugreel-end marker)
   const rawEvents: any[] = recording.rrwebEvents || []
@@ -133,11 +148,6 @@ function initViewer() {
   pageWidth = metaEvent?.data?.width || 1280
   pageHeight = metaEvent?.data?.height || 720
 
-  // Debug — remove once diagnosed
-  const typeCounts = rawEvents.reduce((acc: any, e: any) => { acc[e.type] = (acc[e.type] || 0) + 1; return acc }, {})
-  const srcCounts = rawEvents.filter((e: any) => e.type === 3).reduce((acc: any, e: any) => { acc[e.data?.source] = (acc[e.data?.source] || 0) + 1; return acc }, {})
-  console.log('[bugreel] raw events:', rawEvents.length, 'by type:', typeCounts, '| type-3 sources:', srcCounts)
-  console.log('[bugreel] replayer events (sanitized):', rrwebEvents.length)
 
   const firstTs = rawEvents[0]?.timestamp ?? 0
   const lastTs = rawEvents[rawEvents.length - 1]?.timestamp ?? 0
@@ -168,9 +178,8 @@ function initViewer() {
   }
 
   urlChanges.sort((a, b) => a.offset - b.offset)
-  console.log('[bugreel] urlChanges:', urlChanges.length, urlChanges)
 
-  if (metaUrlEl.value) metaUrlEl.value.textContent = urlChanges[0]?.url || meta.url || ''
+  currentUrl.value = urlChanges[0]?.url || meta.url || ''
 
   if (playerMount.value) {
     playerMount.value.innerHTML = ''
@@ -189,6 +198,9 @@ function initViewer() {
     } catch (err) {
       console.error('[bugreel] Replayer init failed', err)
     }
+
+    // Inject captured fonts into the replay iframe
+    injectCapturedFonts()
   }
 
   applyScale()
@@ -209,6 +221,55 @@ function initViewer() {
   resetInteractions()
   updateUI(0)
   scheduleTick()
+}
+
+// ── Font injection ───────────────────────────────────────────────────────────
+let _fontStyleId = '__bugreel_fonts__'
+let _fontObserver: MutationObserver | null = null
+let _lastIframeDoc: Document | null = null
+
+function buildFontCss(): string {
+  const fonts: any[] = recording?.fonts
+  if (!fonts?.length) return ''
+  let css = ''
+  for (const f of fonts) {
+    css += `@font-face {\n`
+    css += `  font-family: '${f.family}';\n`
+    css += `  font-weight: ${f.weight};\n`
+    css += `  font-style: ${f.style};\n`
+    css += `  src: url('${f.dataUri}') format('${f.format}');\n`
+    css += `}\n`
+  }
+  return css
+}
+
+function injectFontsIntoIframe() {
+  if (!playerMount.value) return
+  const iframe = playerMount.value.querySelector('iframe') as HTMLIFrameElement | null
+  const doc = iframe?.contentDocument
+  if (!doc?.head) return
+  // Avoid duplicate injection in the same document
+  if (doc.getElementById(_fontStyleId)) return
+  const css = buildFontCss()
+  if (!css) return
+  const style = doc.createElement('style')
+  style.id = _fontStyleId
+  style.textContent = css
+  doc.head.appendChild(style)
+}
+
+function injectCapturedFonts() {
+  if (!recording?.fonts?.length) return
+  // Inject immediately
+  injectFontsIntoIframe()
+  // Watch for iframe DOM rebuilds (rrweb rebuilds on play/pause/seek)
+  if (_fontObserver) _fontObserver.disconnect()
+  _fontObserver = new MutationObserver(() => {
+    injectFontsIntoIframe()
+  })
+  if (playerMount.value) {
+    _fontObserver.observe(playerMount.value, { childList: true, subtree: true })
+  }
 }
 
 // ── Scaling ───────────────────────────────────────────────────────────────────
@@ -272,6 +333,7 @@ function onSeekerMouseup() {
     scheduleTick()
   } else {
     replayer?.pause(offset)
+    updateUI(offset)
   }
   seekingFrom = null
 }
@@ -309,14 +371,15 @@ function updateUI(t: number) {
   if (progressFillEl.value) progressFillEl.value.style.width = `${pct}%`
   if (timeDisplayEl.value) timeDisplayEl.value.textContent = `${fmtTime(t)} / ${fmtTime(totalDuration)}`
   currentTimeDisplay.value = fmtTime(t)
+  currentTimeMs.value = t
   // Update URL to reflect navigation at time t
-  if (metaUrlEl.value && urlChanges.length) {
+  if (urlChanges.length) {
     let url = urlChanges[0].url
     for (const change of urlChanges) {
       if (change.offset <= t) url = change.url
       else break
     }
-    metaUrlEl.value.textContent = url
+    currentUrl.value = url
   }
   updateConsole(t)
   updateNetwork(t)
@@ -442,6 +505,55 @@ function buildInteractionEntry(ev: any) {
 
 // ── Network ───────────────────────────────────────────────────────────────────
 let expandedNetIdx: number | null = null
+const netFilterType = ref('all')
+const netFilterMethod = ref('all')
+const netFilterStatus = ref('all')
+
+function guessType(ev: any): string {
+  const t = (ev.type || '').toLowerCase()
+  if (t === 'fetch' || t === 'xmlhttprequest' || t === 'xhr') return 'XHR'
+  if (t === 'script') return 'JS'
+  if (t === 'link' || t === 'css') return 'CSS'
+  if (t === 'img') return 'Img'
+  if (t === 'font') return 'Font'
+  if (t === 'media' || t === 'video' || t === 'audio') return 'Media'
+  // Guess from URL extension
+  const url = (ev.url || '').split('?')[0].toLowerCase()
+  if (url.match(/\.(js|mjs|cjs)$/)) return 'JS'
+  if (url.match(/\.(css)$/)) return 'CSS'
+  if (url.match(/\.(png|jpg|jpeg|gif|svg|webp|ico|avif)$/)) return 'Img'
+  if (url.match(/\.(woff2?|ttf|otf|eot)$/)) return 'Font'
+  if (url.match(/\.(mp4|webm|ogg|mp3|wav)$/)) return 'Media'
+  if (url.match(/\.(html?)$/)) return 'Doc'
+  if (t === 'fetch' || t === 'xmlhttprequest') return 'XHR'
+  if (ev.method && ev.method !== 'GET') return 'XHR'
+  return 'Other'
+}
+
+function statusCategory(ev: any): string {
+  const s = ev.status || 0
+  if (ev.error) return 'Error'
+  if (s >= 500) return '5xx'
+  if (s >= 400) return '4xx'
+  if (s >= 300) return '3xx'
+  if (s >= 200) return '2xx'
+  return 'Other'
+}
+
+const TYPE_COLORS: Record<string, string> = {
+  XHR: '#4c8dff', JS: '#f5c542', CSS: '#c084fc', Img: '#3ecf8e',
+  Font: '#f4844a', Media: '#f16370', Doc: '#60a5fa', Other: '#6b6b76',
+}
+
+function matchesNetFilters(ev: any): boolean {
+  if (netFilterType.value !== 'all' && guessType(ev) !== netFilterType.value) return false
+  if (netFilterMethod.value !== 'all') {
+    const m = (ev.method || '').toUpperCase() || 'GET'
+    if (m !== netFilterMethod.value) return false
+  }
+  if (netFilterStatus.value !== 'all' && statusCategory(ev) !== netFilterStatus.value) return false
+  return true
+}
 
 function renderNetworkTable() {
   if (!recording || !networkBodyEl.value) return
@@ -449,17 +561,34 @@ function renderNetworkTable() {
   networkBodyEl.value.innerHTML = ''
   events.forEach((ev: any, i: number) => {
     const row = document.createElement('tr')
+    const rtype = guessType(ev)
+    const color = TYPE_COLORS[rtype] || TYPE_COLORS.Other
     row.className = 'net-row net-pending'
     row.dataset.idx = String(i)
+    if (!matchesNetFilters(ev)) row.style.display = 'none'
     row.innerHTML = `
-      <td class="col-method">${escHtml(ev.method || '?')}</td>
+      <td class="col-method">${escHtml(ev.method || 'GET')}</td>
       <td class="col-status">·</td>
+      <td class="col-type"><span class="net-type-badge" style="color:${color};border-color:${color}">${rtype}</span></td>
       <td class="col-url" title="${escHtml(ev.url)}">${escHtml(fmtUrl(ev.url))}</td>
       <td class="col-dur">·</td>`
     row.addEventListener('click', () => toggleNetworkDetail(i))
     networkBodyEl.value!.appendChild(row)
   })
 }
+
+watch([netFilterType, netFilterMethod, netFilterStatus], () => {
+  if (!recording || !networkBodyEl.value) return
+  const events = recording.networkEvents || []
+  const rows = networkBodyEl.value.querySelectorAll<HTMLTableRowElement>('tr.net-row')
+  let visible = 0
+  rows.forEach((row) => {
+    const ev = events[Number(row.dataset.idx)]
+    if (matchesNetFilters(ev)) { row.style.display = ''; visible++ }
+    else row.style.display = 'none'
+  })
+  if (networkCountEl.value) networkCountEl.value.textContent = fmtCount(visible)
+})
 
 function toggleNetworkDetail(idx: number) {
   if (!networkBodyEl.value) return
@@ -479,7 +608,7 @@ function toggleNetworkDetail(idx: number) {
   const detailRow = document.createElement('tr')
   detailRow.className = 'net-detail-row'
   const td = document.createElement('td')
-  td.colSpan = 4
+  td.colSpan = 5
   td.innerHTML = buildDetailHTML(ev)
   detailRow.appendChild(td)
   mainRow.after(detailRow)
@@ -508,6 +637,15 @@ function buildDetailHTML(ev: any) {
   const statusLine = ev.statusLine
     ? `<div class="net-detail-section"><div class="net-detail-label">Status</div><div class="net-hdr-value">${escHtml(ev.statusLine)}</div></div>`
     : ''
+  let resBody = ''
+  if (ev.responseBody) {
+    let formatted = ev.responseBody
+    try {
+      const parsed = JSON.parse(ev.responseBody)
+      formatted = JSON.stringify(parsed, null, 2)
+    } catch (_) {}
+    resBody = `<div class="net-detail-section"><div class="net-detail-label">Body</div><pre class="net-detail-body">${escHtml(formatted)}</pre></div>`
+  }
   return `
     <div class="net-detail">
       <div class="net-detail-tabs">
@@ -531,6 +669,7 @@ function buildDetailHTML(ev: any) {
           <div class="net-detail-label">Headers</div>
           <div class="net-detail-headers">${resHeaders}</div>
         </div>
+        ${resBody}
       </div>
     </div>`
 }
@@ -542,14 +681,15 @@ function updateNetwork(t: number) {
   rows.forEach((row) => {
     const ev = events[Number(row.dataset.idx)]
     const statusEl = row.children[1] as HTMLElement
-    const durEl = row.children[3] as HTMLElement
+    const durEl = row.children[4] as HTMLElement
     const isExpanded = row.classList.contains('expanded')
     let stateClass: string
+    const endTime = ev.endTime ?? (ev.duration != null ? ev.time + ev.duration : 0)
     if (t < ev.time) {
       stateClass = 'net-pending'
       statusEl.textContent = '·'
       durEl.textContent = '·'
-    } else if (ev.endTime && t < ev.endTime) {
+    } else if (endTime && t < endTime) {
       stateClass = 'net-active'
       statusEl.textContent = '…'
       durEl.textContent = '…'
@@ -564,10 +704,13 @@ function updateNetwork(t: number) {
       durEl.textContent = ev.duration != null ? `${ev.duration}ms` : '·'
     }
     row.className = `net-row ${stateClass}${isExpanded ? ' expanded' : ''}`
+    if (!matchesNetFilters(ev)) row.style.display = 'none'
   })
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtCount(n: number): string { return n > 99 ? '99+' : String(n) }
+
 function fmtTime(ms: number) {
   if (!ms || ms < 0) ms = 0
   const s = Math.floor(ms / 1000)
@@ -599,7 +742,6 @@ async function loadComments() {
     const headers: Record<string, string> = token.value ? { Authorization: `Bearer ${token.value}` } : {}
     const data = await $fetch<any[]>(`/api/reels/${reelId}/comments`, { headers })
     comments.value = data
-    if (commentsCountEl.value) commentsCountEl.value.textContent = String(data.length)
   } catch {}
 }
 
@@ -608,12 +750,17 @@ async function submitComment() {
   submitting.value = true
   try {
     const headers: Record<string, string> = token.value ? { Authorization: `Bearer ${token.value}` } : {}
+    const body: any = { content: newCommentContent.value.trim(), timestamp_ms: Math.round(clock.current) }
+    if (pinnedElement.value) {
+      body.element_info = JSON.stringify(pinnedElement.value)
+    }
     await $fetch(`/api/reels/${reelId}/comments`, {
       method: 'POST',
       headers,
-      body: { content: newCommentContent.value.trim(), timestamp_ms: Math.round(clock.current) },
+      body,
     })
     newCommentContent.value = ''
+    pinnedElement.value = null
     await loadComments()
   } finally {
     submitting.value = false
@@ -754,6 +901,519 @@ function downloadPlaywright() {
   setTimeout(() => URL.revokeObjectURL(url), 5000)
 }
 
+// ── DOM Inspector ─────────────────────────────────────────────────────────────
+const inspectActive = ref(false)
+const inspectInfo = ref<{
+  tag: string
+  id: string
+  classes: string
+  dimensions: string
+  path: string
+  attributes: { name: string; value: string }[]
+  styles: { prop: string; value: string }[]
+} | null>(null)
+
+let inspectHighlightEl: HTMLDivElement | null = null
+let inspectTooltipEl: HTMLDivElement | null = null
+let currentInspectEl: Element | null = null
+
+function getReplayIframe(): HTMLIFrameElement | null {
+  return playerMount.value?.querySelector('iframe') ?? null
+}
+
+function toggleInspect() {
+  inspectActive.value ? deactivateInspect() : activateInspect()
+}
+
+function activateInspect() {
+  const iframe = getReplayIframe()
+  if (!iframe?.contentDocument) return
+
+  // Pause playback
+  if (clock.playing) {
+    replayer?.pause()
+    clock.pause()
+    if (playBtnEl.value) playBtnEl.value.textContent = '\u25B6'
+  }
+
+  inspectActive.value = true
+  inspectInfo.value = null
+
+  // Allow pointer events on the replay via CSS class
+  if (playerMount.value) playerMount.value.classList.add('inspect-mode')
+
+  const doc = iframe.contentDocument
+  doc.body.style.cursor = 'crosshair'
+
+  // Highlight overlay inside iframe
+  inspectHighlightEl = doc.createElement('div')
+  inspectHighlightEl.id = '__bugreel_highlight__'
+  Object.assign(inspectHighlightEl.style, {
+    position: 'fixed', pointerEvents: 'none', zIndex: '2147483646',
+    border: '2px solid #4c8dff', background: 'rgba(76, 141, 255, 0.08)',
+    borderRadius: '2px', transition: 'all 0.05s ease-out', display: 'none',
+  })
+  doc.body.appendChild(inspectHighlightEl)
+
+  // Tooltip inside iframe
+  inspectTooltipEl = doc.createElement('div')
+  inspectTooltipEl.id = '__bugreel_tooltip__'
+  Object.assign(inspectTooltipEl.style, {
+    position: 'fixed', pointerEvents: 'none', zIndex: '2147483647',
+    background: '#1c1c1f', color: '#e2e2e6', padding: '4px 8px',
+    borderRadius: '4px', fontSize: '11px',
+    fontFamily: "'JetBrains Mono','Fira Code',ui-monospace,monospace",
+    whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(0,0,0,0.6)',
+    border: '1px solid #2e2e33', display: 'none',
+  })
+  doc.body.appendChild(inspectTooltipEl)
+
+  doc.addEventListener('mousemove', onInspectMove)
+  doc.addEventListener('click', onInspectClick, true)
+  window.addEventListener('keydown', onInspectKeydown)
+}
+
+function deactivateInspect() {
+  inspectActive.value = false
+  inspectInfo.value = null
+  currentInspectEl = null
+
+  const iframe = getReplayIframe()
+  const doc = iframe?.contentDocument
+  if (doc) {
+    doc.removeEventListener('mousemove', onInspectMove)
+    doc.removeEventListener('click', onInspectClick, true)
+    doc.body.style.cursor = ''
+    inspectHighlightEl?.remove()
+    inspectTooltipEl?.remove()
+  }
+
+  if (playerMount.value) playerMount.value.classList.remove('inspect-mode')
+
+  inspectHighlightEl = null
+  inspectTooltipEl = null
+  window.removeEventListener('keydown', onInspectKeydown)
+}
+
+function onInspectKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') deactivateInspect()
+}
+
+function onInspectMove(e: MouseEvent) {
+  const iframe = getReplayIframe()
+  if (!iframe?.contentDocument) return
+
+  const el = iframe.contentDocument.elementFromPoint(e.clientX, e.clientY)
+  if (!el || el.id === '__bugreel_highlight__' || el.id === '__bugreel_tooltip__') return
+
+  currentInspectEl = el
+  const rect = el.getBoundingClientRect()
+
+  if (inspectHighlightEl) {
+    Object.assign(inspectHighlightEl.style, {
+      display: 'block',
+      left: `${rect.left}px`, top: `${rect.top}px`,
+      width: `${rect.width}px`, height: `${rect.height}px`,
+    })
+  }
+
+  if (inspectTooltipEl) {
+    const tag = el.tagName.toLowerCase()
+    const id = el.id ? `#${el.id}` : ''
+    const cls = el.className && typeof el.className === 'string'
+      ? '.' + el.className.trim().split(/\s+/).slice(0, 3).join('.')
+      : ''
+    const dims = `${Math.round(rect.width)}\u00d7${Math.round(rect.height)}`
+
+    inspectTooltipEl.innerHTML = ''
+    const tagSpan = document.createElement('span')
+    tagSpan.style.color = '#f4844a'
+    tagSpan.textContent = tag
+    inspectTooltipEl.appendChild(tagSpan)
+    if (id) {
+      const idSpan = document.createElement('span')
+      idSpan.style.color = '#4c8dff'
+      idSpan.textContent = id
+      inspectTooltipEl.appendChild(idSpan)
+    }
+    if (cls) {
+      const clsSpan = document.createElement('span')
+      clsSpan.style.color = '#3ecf8e'
+      clsSpan.textContent = cls
+      inspectTooltipEl.appendChild(clsSpan)
+    }
+    const dimSpan = document.createElement('span')
+    dimSpan.style.cssText = 'color:#6b6b76;margin-left:8px'
+    dimSpan.textContent = dims
+    inspectTooltipEl.appendChild(dimSpan)
+
+    inspectTooltipEl.style.display = 'block'
+    let top = rect.top - 28
+    if (top < 4) top = rect.bottom + 4
+    inspectTooltipEl.style.left = `${Math.max(4, rect.left)}px`
+    inspectTooltipEl.style.top = `${top}px`
+  }
+}
+
+function onInspectClick(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+
+  if (!currentInspectEl) return
+  const el = currentInspectEl
+  const rect = el.getBoundingClientRect()
+
+  // DOM path
+  const pathParts: string[] = []
+  let node: Element | null = el
+  while (node && node.tagName?.toLowerCase() !== 'html') {
+    const tag = node.tagName.toLowerCase()
+    const nid = node.id ? `#${node.id}` : ''
+    const cls = node.className && typeof node.className === 'string'
+      ? '.' + node.className.trim().split(/\s+/).slice(0, 2).join('.')
+      : ''
+    pathParts.unshift(`${tag}${nid}${cls}`)
+    node = node.parentElement
+  }
+
+  // Attributes
+  const attributes: { name: string; value: string }[] = []
+  for (const attr of Array.from(el.attributes)) {
+    if (attr.name === 'style' && attr.value.length > 100) continue
+    attributes.push({
+      name: attr.name,
+      value: attr.value.length > 120 ? attr.value.slice(0, 120) + '\u2026' : attr.value,
+    })
+  }
+
+  // Computed styles
+  const computed = el.ownerDocument.defaultView?.getComputedStyle(el)
+  const keys = [
+    'display', 'position', 'color', 'background-color', 'font-size',
+    'font-family', 'margin', 'padding', 'border', 'width', 'height',
+    'z-index', 'opacity', 'overflow', 'flex', 'grid-template-columns',
+  ]
+  const skipValues = new Set([
+    'none', 'normal', '0px', 'rgba(0, 0, 0, 0)', 'auto', '1',
+    'visible', 'block', 'static', '0', 'inherit', 'start',
+  ])
+  const styles: { prop: string; value: string }[] = []
+  if (computed) {
+    for (const prop of keys) {
+      let val = computed.getPropertyValue(prop)
+      if (!val || skipValues.has(val)) continue
+      if (prop === 'font-family' && val.length > 50) val = val.slice(0, 50) + '\u2026'
+      styles.push({ prop, value: val })
+    }
+  }
+
+  inspectInfo.value = {
+    tag: el.tagName.toLowerCase(),
+    id: el.id || '',
+    classes: el.className && typeof el.className === 'string' ? el.className.trim() : '',
+    dimensions: `${Math.round(rect.width)} \u00d7 ${Math.round(rect.height)}`,
+    path: pathParts.join(' > '),
+    attributes,
+    styles,
+  }
+}
+
+function openDomInNewTab() {
+  const iframe = getReplayIframe()
+  if (!iframe?.contentDocument) return
+
+  const clone = iframe.contentDocument.documentElement.cloneNode(true) as HTMLElement
+  clone.querySelector('#__bugreel_highlight__')?.remove()
+  clone.querySelector('#__bugreel_tooltip__')?.remove()
+
+  const html = '<!DOCTYPE html>\n' + clone.outerHTML
+  const blob = new Blob([html], { type: 'text/html' })
+  const url = URL.createObjectURL(blob)
+  window.open(url, '_blank')
+  setTimeout(() => URL.revokeObjectURL(url), 10000)
+}
+
+// ── Element Pick Mode ─────────────────────────────────────────────────────────
+function escapeCssClass(cls: string): string {
+  // Escape characters that are special in CSS selectors: [ ] : ( ) . / @
+  return cls.replace(/([[\]:()./\\@!#$%^&*+~'",<>{}|`])/g, '\\$1')
+}
+
+function buildCssPath(el: Element): string {
+  const parts: string[] = []
+  let node: Element | null = el
+  while (node && node.tagName?.toLowerCase() !== 'html') {
+    const tag = node.tagName.toLowerCase()
+    if (node.id) {
+      parts.unshift(`${tag}#${escapeCssClass(node.id)}`)
+      break
+    }
+    let cls = ''
+    if (node.className && typeof node.className === 'string') {
+      // Filter out classes with special chars that are hard to escape reliably (Tailwind arbitrary values)
+      const safe = node.className.trim().split(/\s+/)
+        .filter(c => !/[[\]():]/.test(c))
+        .slice(0, 2)
+      if (safe.length) cls = '.' + safe.map(escapeCssClass).join('.')
+    }
+    let nth = ''
+    if (node.parentElement) {
+      const siblings = Array.from(node.parentElement.children).filter(c => c.tagName === node!.tagName)
+      if (siblings.length > 1) {
+        nth = `:nth-child(${Array.from(node.parentElement.children).indexOf(node) + 1})`
+      }
+    }
+    parts.unshift(`${tag}${cls}${nth}`)
+    node = node.parentElement
+  }
+  return parts.join(' > ')
+}
+
+function buildDisplayLabel(tag: string, id: string, classes: string): string {
+  let label = `<${tag}`
+  if (id) label += `#${id}`
+  else if (classes) label += `.${classes.split(' ')[0]}`
+  label += '>'
+  return label
+}
+
+function activatePickMode() {
+  if (inspectActive.value) deactivateInspect()
+
+  const iframe = getReplayIframe()
+  if (!iframe?.contentDocument) return
+
+  if (clock.playing) {
+    replayer?.pause()
+    clock.pause()
+    if (playBtnEl.value) playBtnEl.value.textContent = '\u25B6'
+  }
+
+  pickModeActive.value = true
+
+  if (playerMount.value) playerMount.value.classList.add('inspect-mode')
+
+  const doc = iframe.contentDocument
+  doc.body.style.cursor = 'crosshair'
+
+  pickHighlightEl = doc.createElement('div')
+  pickHighlightEl.id = '__bugreel_pick_highlight__'
+  Object.assign(pickHighlightEl.style, {
+    position: 'fixed', pointerEvents: 'none', zIndex: '2147483646',
+    border: '2px solid #4c8dff', background: 'rgba(76, 141, 255, 0.10)',
+    borderRadius: '2px', transition: 'all 0.05s ease-out', display: 'none',
+  })
+  doc.body.appendChild(pickHighlightEl)
+
+  pickTooltipEl = doc.createElement('div')
+  pickTooltipEl.id = '__bugreel_pick_tooltip__'
+  Object.assign(pickTooltipEl.style, {
+    position: 'fixed', pointerEvents: 'none', zIndex: '2147483647',
+    background: '#1c1c1f', color: '#e2e2e6', padding: '4px 8px',
+    borderRadius: '4px', fontSize: '11px',
+    fontFamily: "'JetBrains Mono','Fira Code',ui-monospace,monospace",
+    whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(0,0,0,0.6)',
+    border: '1px solid #4c8dff', display: 'none',
+  })
+  doc.body.appendChild(pickTooltipEl)
+
+  doc.addEventListener('mousemove', onPickMove)
+  doc.addEventListener('click', onPickClick, true)
+  window.addEventListener('keydown', onPickKeydown)
+}
+
+function deactivatePickMode() {
+  pickModeActive.value = false
+  currentPickEl = null
+
+  const iframe = getReplayIframe()
+  const doc = iframe?.contentDocument
+  if (doc) {
+    doc.removeEventListener('mousemove', onPickMove)
+    doc.removeEventListener('click', onPickClick, true)
+    doc.body.style.cursor = ''
+    pickHighlightEl?.remove()
+    pickTooltipEl?.remove()
+  }
+
+  if (playerMount.value) playerMount.value.classList.remove('inspect-mode')
+
+  pickHighlightEl = null
+  pickTooltipEl = null
+  window.removeEventListener('keydown', onPickKeydown)
+}
+
+function onPickKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') deactivatePickMode()
+}
+
+function onPickMove(e: MouseEvent) {
+  const iframe = getReplayIframe()
+  if (!iframe?.contentDocument) return
+
+  const el = iframe.contentDocument.elementFromPoint(e.clientX, e.clientY)
+  if (!el || el.id === '__bugreel_pick_highlight__' || el.id === '__bugreel_pick_tooltip__') return
+
+  currentPickEl = el
+  const rect = el.getBoundingClientRect()
+
+  if (pickHighlightEl) {
+    Object.assign(pickHighlightEl.style, {
+      display: 'block',
+      left: `${rect.left}px`, top: `${rect.top}px`,
+      width: `${rect.width}px`, height: `${rect.height}px`,
+    })
+  }
+
+  if (pickTooltipEl) {
+    const tag = el.tagName.toLowerCase()
+    const id = el.id ? `#${el.id}` : ''
+    const cls = el.className && typeof el.className === 'string'
+      ? '.' + el.className.trim().split(/\s+/).slice(0, 3).join('.')
+      : ''
+
+    pickTooltipEl.textContent = `${tag}${id}${cls}`
+    pickTooltipEl.style.display = 'block'
+    let top = rect.top - 28
+    if (top < 4) top = rect.bottom + 4
+    pickTooltipEl.style.left = `${Math.max(4, rect.left)}px`
+    pickTooltipEl.style.top = `${top}px`
+  }
+}
+
+function onPickClick(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+
+  if (!currentPickEl) return
+  const el = currentPickEl
+
+  const tag = el.tagName.toLowerCase()
+  const id = el.id || ''
+  const classes = el.className && typeof el.className === 'string' ? el.className.trim() : ''
+  const cssPath = buildCssPath(el)
+  const displayLabel = buildDisplayLabel(tag, id, classes)
+
+  pinnedElement.value = { tag, id, classes, cssPath, displayLabel }
+
+  deactivatePickMode()
+}
+
+function clearPinnedElement() {
+  pinnedElement.value = null
+}
+
+function findElementInIframe(elementInfo: any): Element | null {
+  const iframe = getReplayIframe()
+  if (!iframe?.contentDocument) return null
+  const doc = iframe.contentDocument
+  let target: Element | null = null
+
+  // Try the full CSS path
+  try { target = doc.querySelector(elementInfo.cssPath) } catch {}
+
+  // Fallback: find by ID
+  if (!target && elementInfo.id) target = doc.getElementById(elementInfo.id)
+
+  // Fallback: try progressively shorter paths (from the end)
+  if (!target && elementInfo.cssPath) {
+    const parts = (elementInfo.cssPath as string).split(' > ')
+    for (let i = parts.length - 1; i >= Math.max(0, parts.length - 3); i--) {
+      const partial = parts.slice(i).join(' > ')
+      try { target = doc.querySelector(partial) } catch {}
+      if (target) break
+    }
+  }
+
+  return target
+}
+
+function doHighlightElement(elementInfo: any) {
+  const iframe = getReplayIframe()
+  if (!iframe?.contentDocument) return
+  const doc = iframe.contentDocument
+
+  const target = findElementInIframe(elementInfo)
+  if (!target) return
+
+  doc.getElementById('__bugreel_comment_highlight__')?.remove()
+
+  const rect = target.getBoundingClientRect()
+  const hl = doc.createElement('div')
+  hl.id = '__bugreel_comment_highlight__'
+  Object.assign(hl.style, {
+    position: 'fixed', pointerEvents: 'none', zIndex: '2147483646',
+    border: '2px solid #ff4070', background: 'rgba(255, 64, 112, 0.15)',
+    borderRadius: '2px',
+    left: `${rect.left}px`, top: `${rect.top}px`,
+    width: `${rect.width}px`, height: `${rect.height}px`,
+    transition: 'opacity 0.3s',
+  })
+  doc.body.appendChild(hl)
+
+  setTimeout(() => {
+    if (hl.parentElement) {
+      hl.style.opacity = '0'
+      setTimeout(() => hl.remove(), 300)
+    }
+  }, 3000)
+}
+
+function highlightCommentElement(elementInfo: any) {
+  if (!elementInfo?.cssPath) return
+
+  if (clock.playing) {
+    replayer?.pause()
+    clock.pause()
+    if (playBtnEl.value) playBtnEl.value.textContent = '\u25B6'
+  }
+
+  // rrweb rebuilds the DOM asynchronously after pause/seek — retry until found
+  let attempts = 0
+  const tryHighlight = () => {
+    if (findElementInIframe(elementInfo)) {
+      doHighlightElement(elementInfo)
+    } else if (attempts++ < 10) {
+      setTimeout(tryHighlight, 100)
+    }
+  }
+  tryHighlight()
+}
+
+// ── Hover highlight for comment element badges ──────────────────────────────
+function showElementHighlight(elementInfo: any) {
+  if (!elementInfo?.cssPath) return
+
+  const iframe = getReplayIframe()
+  if (!iframe?.contentDocument) return
+  const doc = iframe.contentDocument
+
+  const target = findElementInIframe(elementInfo)
+  if (!target) return
+
+  // Remove any previous hover highlight
+  hoverHighlightEl?.remove()
+
+  const rect = target.getBoundingClientRect()
+  const hl = doc.createElement('div')
+  hl.id = '__bugreel_hover_highlight__'
+  Object.assign(hl.style, {
+    position: 'fixed', pointerEvents: 'none', zIndex: '2147483645',
+    background: 'rgba(255, 64, 112, 0.2)',
+    border: '1px solid rgba(255, 64, 112, 0.6)',
+    borderRadius: '2px',
+    left: `${rect.left}px`, top: `${rect.top}px`,
+    width: `${rect.width}px`, height: `${rect.height}px`,
+  })
+  doc.body.appendChild(hl)
+  hoverHighlightEl = hl
+}
+
+function hideElementHighlight() {
+  hoverHighlightEl?.remove()
+  hoverHighlightEl = null
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(() => {
   loadReel()
@@ -763,6 +1423,10 @@ onMounted(() => {
 onUnmounted(() => {
   if (rafId) cancelAnimationFrame(rafId)
   replayer?.pause?.()
+  if (_fontObserver) { _fontObserver.disconnect(); _fontObserver = null }
+  if (inspectActive.value) deactivateInspect()
+  if (pickModeActive.value) deactivatePickMode()
+  hideElementHighlight()
 })
 </script>
 
@@ -783,14 +1447,40 @@ onUnmounted(() => {
     <template v-else>
       <!-- Meta bar -->
       <div id="meta-bar">
-        <span class="meta-label">URL</span>
-        <span ref="metaUrlEl" class="meta-value" />
-        <span class="meta-sep">·</span>
-        <span class="meta-label">Recorded</span>
-        <span ref="metaDateEl" class="meta-value" />
-        <button class="meta-export-btn" title="Export Playwright reproduction script" @click="downloadPlaywright">
-          <span class="meta-export-icon">⬇</span> Playwright
-        </button>
+        <div class="meta-url-bar">
+          <svg class="meta-globe" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+          <span class="meta-url-text">{{ currentUrl || '…' }}</span>
+        </div>
+        <span ref="metaDateEl" class="meta-date" />
+
+        <!-- Action buttons -->
+        <div class="meta-actions">
+          <button class="meta-action meta-action--playwright" title="Export as Playwright test" @click="downloadPlaywright">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Playwright</span>
+          </button>
+          <button
+            class="meta-action meta-action--inspect"
+            :class="{ 'meta-action--active': inspectActive }"
+            title="Inspect DOM elements"
+            @click="toggleInspect"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <span>{{ inspectActive ? 'Stop' : 'Inspect' }}</span>
+          </button>
+          <button class="meta-action meta-action--dom" title="Open DOM snapshot in new tab" @click="openDomInNewTab">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+            </svg>
+            <span>DOM</span>
+          </button>
+        </div>
       </div>
 
       <!-- Main area -->
@@ -798,6 +1488,38 @@ onUnmounted(() => {
         <!-- Player -->
         <div ref="playerWrap" id="player-wrap">
             <div ref="playerMount" id="player-mount" />
+
+            <!-- Inspector detail panel -->
+            <div v-if="inspectInfo" class="inspect-panel">
+              <div class="inspect-header">
+                <div class="inspect-selector">
+                  <span class="inspect-tag">&lt;{{ inspectInfo.tag }}&gt;</span>
+                  <span v-if="inspectInfo.id" class="inspect-id">#{{ inspectInfo.id }}</span>
+                  <span v-if="inspectInfo.classes" class="inspect-cls">.{{ inspectInfo.classes.split(' ').join('.') }}</span>
+                </div>
+                <span class="inspect-dims">{{ inspectInfo.dimensions }}</span>
+                <button class="inspect-close" @click="inspectInfo = null">&times;</button>
+              </div>
+              <div class="inspect-path">{{ inspectInfo.path }}</div>
+              <div v-if="inspectInfo.attributes.length" class="inspect-section">
+                <div class="inspect-section-title">Attributes</div>
+                <div class="inspect-attrs">
+                  <template v-for="attr in inspectInfo.attributes" :key="attr.name">
+                    <span class="inspect-attr-name">{{ attr.name }}</span>
+                    <span class="inspect-attr-val">{{ attr.value }}</span>
+                  </template>
+                </div>
+              </div>
+              <div v-if="inspectInfo.styles.length" class="inspect-section">
+                <div class="inspect-section-title">Computed</div>
+                <div class="inspect-styles">
+                  <template v-for="s in inspectInfo.styles" :key="s.prop">
+                    <span class="inspect-style-prop">{{ s.prop }}</span>
+                    <span class="inspect-style-val">{{ s.value }}</span>
+                  </template>
+                </div>
+              </div>
+            </div>
         </div>
 
         <!-- Side panel -->
@@ -833,7 +1555,7 @@ onUnmounted(() => {
               @click="activeTab = 'comments'"
             >
               Comments
-              <span ref="commentsCountEl" class="tab-count">0</span>
+              <span class="tab-count">{{ fmtCount(comments.length) }}</span>
             </button>
           </div>
 
@@ -853,17 +1575,59 @@ onUnmounted(() => {
             :class="{ active: activeTab === 'network' }"
             id="network-panel"
           >
-            <table class="net-table">
-              <thead>
-                <tr>
-                  <th class="col-method">Method</th>
-                  <th class="col-status">Status</th>
-                  <th class="col-url">URL</th>
-                  <th class="col-dur">Time</th>
-                </tr>
-              </thead>
-              <tbody ref="networkBodyEl" id="network-body" />
-            </table>
+            <div class="net-filters">
+              <div class="net-filter-group">
+                <label>Type</label>
+                <select v-model="netFilterType">
+                  <option value="all">All</option>
+                  <option value="XHR">XHR</option>
+                  <option value="JS">JS</option>
+                  <option value="CSS">CSS</option>
+                  <option value="Img">Img</option>
+                  <option value="Font">Font</option>
+                  <option value="Media">Media</option>
+                  <option value="Doc">Doc</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div class="net-filter-group">
+                <label>Method</label>
+                <select v-model="netFilterMethod">
+                  <option value="all">All</option>
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="DELETE">DELETE</option>
+                  <option value="OPTIONS">OPTIONS</option>
+                </select>
+              </div>
+              <div class="net-filter-group">
+                <label>Status</label>
+                <select v-model="netFilterStatus">
+                  <option value="all">All</option>
+                  <option value="2xx">2xx</option>
+                  <option value="3xx">3xx</option>
+                  <option value="4xx">4xx</option>
+                  <option value="5xx">5xx</option>
+                  <option value="Error">Error</option>
+                </select>
+              </div>
+            </div>
+            <div class="net-table-wrap">
+              <table class="net-table">
+                <thead>
+                  <tr>
+                    <th class="col-method">Method</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-type">Type</th>
+                    <th class="col-url">URL</th>
+                    <th class="col-dur">Time</th>
+                  </tr>
+                </thead>
+                <tbody ref="networkBodyEl" id="network-body" />
+              </table>
+            </div>
           </div>
 
           <!-- Interactions panel -->
@@ -884,14 +1648,43 @@ onUnmounted(() => {
           >
             <!-- New comment form -->
             <div class="cm-compose">
-              <textarea
-                v-model="newCommentContent"
-                class="cm-textarea"
-                placeholder="Add a comment at current time…"
-                rows="2"
-                @keydown.ctrl.enter.prevent="submitComment"
-                @keydown.meta.enter.prevent="submitComment"
-              />
+              <div class="cm-input-box">
+                <textarea
+                  v-model="newCommentContent"
+                  class="cm-textarea"
+                  placeholder="Add a comment at current time…"
+                  rows="2"
+                  @keydown.ctrl.enter.prevent="submitComment"
+                  @keydown.meta.enter.prevent="submitComment"
+                />
+                <div class="cm-input-footer">
+                  <!-- Pinned element badge -->
+                  <div v-if="pinnedElement" class="cm-pinned-badge">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
+                    </svg>
+                    <span class="cm-pinned-label">{{ pinnedElement.displayLabel }}</span>
+                    <button class="cm-pinned-remove" @click="clearPinnedElement">&times;</button>
+                  </div>
+                  <!-- Pick mode hint -->
+                  <div v-else-if="pickModeActive" class="cm-pick-inline-hint">
+                    Click an element in the player…
+                  </div>
+                  <!-- Pin button -->
+                  <button
+                    v-if="!pinnedElement"
+                    class="cm-pin-btn"
+                    :class="{ 'cm-pin-btn--active': pickModeActive }"
+                    :title="pickModeActive ? 'Cancel' : 'Pin a DOM element to this comment'"
+                    @click="pickModeActive ? deactivatePickMode() : activatePickMode()"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
+                    </svg>
+                    <span class="cm-pin-label">Select element</span>
+                  </button>
+                </div>
+              </div>
               <button class="cm-send-btn" :disabled="submitting || !newCommentContent.trim()" @click="submitComment">
                 Comment at {{ currentTimeDisplay }}
               </button>
@@ -899,7 +1692,7 @@ onUnmounted(() => {
 
             <!-- Thread list -->
             <div v-if="commentThreads.length === 0" class="cm-empty">No comments yet</div>
-            <div v-for="thread in commentThreads" :key="thread.id" class="cm-thread">
+            <div v-for="thread in commentThreads" :key="thread.id" class="cm-thread" :class="{ 'cm-future': thread.timestamp_ms > currentTimeMs }">
               <!-- Root comment -->
               <div class="cm-msg cm-msg-root">
                 <div class="cm-header">
@@ -910,9 +1703,27 @@ onUnmounted(() => {
                   <span class="cm-date">{{ fmtDate(thread.created_at) }}</span>
                 </div>
                 <div class="cm-content">{{ thread.content }}</div>
-                <button class="cm-reply-toggle" @click="openReplyId = openReplyId === thread.id ? null : thread.id; replyContent = ''">
-                  Reply
-                </button>
+                <div class="cm-actions-row">
+                  <button
+                    v-if="thread.element_info"
+                    class="cm-element-badge"
+                    title="Click to highlight element in player"
+                    @click="jumpToComment(thread.timestamp_ms); $nextTick(() => highlightCommentElement(thread.element_info))"
+                    @mouseenter="showElementHighlight(thread.element_info)"
+                    @mouseleave="hideElementHighlight()"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="9" r="4"/><path d="M12 13v4"/>
+                    </svg>
+                    {{ thread.element_info.displayLabel || '&lt;element&gt;' }}
+                  </button>
+                  <button class="cm-reply-toggle" @click="openReplyId = openReplyId === thread.id ? null : thread.id; replyContent = ''">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
+                    </svg>
+                    Reply
+                  </button>
+                </div>
               </div>
 
               <!-- Replies -->
@@ -1037,59 +1848,108 @@ onUnmounted(() => {
 
 /* ── Meta bar ────────────────────────────────────────────────────────────── */
 #meta-bar {
-  height: 30px;
+  height: 34px;
   flex-shrink: 0;
   background: #1c1c1f;
   border-bottom: 1px solid #2e2e33;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 14px;
+  padding: 0 10px;
   font-size: 11px;
-  overflow: hidden;
+  overflow: visible;
   white-space: nowrap;
 }
 
-.meta-label {
-  color: #6b6b76;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  font-size: 10px;
+.meta-url-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #111113;
+  border: 1px solid #2e2e33;
+  border-radius: 6px;
+  padding: 3px 10px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
-
-.meta-value {
+.meta-globe {
+  color: #6b6b76;
+  flex-shrink: 0;
+}
+.meta-url-text {
   color: #e2e2e6;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
 }
 
-.meta-sep { color: #2e2e33; }
+.meta-date {
+  color: #6b6b76;
+  font-size: 10px;
+  flex-shrink: 0;
+}
 
-.meta-export-btn {
-  margin-left: auto;
+/* ── Action buttons ── */
+.meta-actions {
+  display: flex;
+  gap: 5px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+.meta-action {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 9px;
-  border-radius: 4px;
-  border: 1px solid #2e2e33;
-  background: transparent;
-  color: #9b9ba8;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
+  gap: 5px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 5px;
+  border: 1px solid transparent;
   cursor: pointer;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
   white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition: all 0.15s;
 }
-.meta-export-btn:hover {
-  color: #e2e2e6;
-  border-color: #4c8dff;
+.meta-action--playwright {
+  background: rgba(52, 211, 153, 0.10);
+  color: #6ee7b7;
+  border-color: rgba(52, 211, 153, 0.20);
+}
+.meta-action--playwright:hover {
+  background: rgba(52, 211, 153, 0.18);
+  border-color: rgba(52, 211, 153, 0.40);
+  color: #a7f3d0;
+}
+.meta-action--inspect {
+  background: rgba(96, 165, 250, 0.10);
+  color: #93bbfd;
+  border-color: rgba(96, 165, 250, 0.20);
+}
+.meta-action--inspect:hover {
+  background: rgba(96, 165, 250, 0.18);
+  border-color: rgba(96, 165, 250, 0.40);
+  color: #bdd4fe;
+}
+.meta-action--inspect.meta-action--active {
+  background: rgba(96, 165, 250, 0.22);
+  border-color: rgba(96, 165, 250, 0.55);
+  color: #bdd4fe;
+  box-shadow: 0 0 10px rgba(96, 165, 250, 0.20);
+}
+.meta-action--dom {
+  background: rgba(251, 191, 36, 0.10);
+  color: #fcd34d;
+  border-color: rgba(251, 191, 36, 0.20);
+}
+.meta-action--dom:hover {
+  background: rgba(251, 191, 36, 0.18);
+  border-color: rgba(251, 191, 36, 0.40);
+  color: #fde68a;
   background: rgba(76, 141, 255, 0.08);
 }
-.meta-export-icon { font-size: 9px; }
-
 /* ── Main ────────────────────────────────────────────────────────────────── */
 #main {
   flex: 1;
@@ -1109,6 +1969,18 @@ onUnmounted(() => {
 
 #player-mount :deep(.replayer-wrapper) {
   pointer-events: none;
+}
+#player-mount.inspect-mode :deep(.replayer-wrapper) {
+  pointer-events: auto !important;
+}
+#player-mount.inspect-mode :deep(.replayer-wrapper iframe) {
+  pointer-events: auto !important;
+}
+#player-mount.inspect-mode :deep(.replayer-mouse) {
+  pointer-events: none !important;
+}
+#player-mount.inspect-mode :deep(.replayer-wrapper > *:not(iframe)) {
+  pointer-events: none !important;
 }
 
 /* ── Side panel ──────────────────────────────────────────────────────────── */
@@ -1131,19 +2003,22 @@ onUnmounted(() => {
 
 .tab-btn {
   flex: 1;
-  padding: 9px 12px;
+  padding: 9px 6px;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   color: #6b6b76;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   transition: color 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .tab-btn:hover { color: #e2e2e6; }
@@ -1157,11 +2032,12 @@ onUnmounted(() => {
   background: #242428;
   color: #6b6b76;
   font-size: 10px;
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 10px;
   font-variant-numeric: tabular-nums;
-  min-width: 22px;
+  min-width: 18px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .tab-btn.active .tab-count {
@@ -1177,6 +2053,16 @@ onUnmounted(() => {
 }
 
 .panel.active { display: block; }
+#network-panel.active {
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
+}
+#network-panel .net-table-wrap {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
 
 /* ── Console ─────────────────────────────────────────────────────────────── */
 #console-entries { padding: 2px 0; }
@@ -1238,6 +2124,42 @@ onUnmounted(() => {
 :deep(.replayer-mouse::after) { display: none !important; }
 :deep(.replayer-mouse-tail)   { display: none !important; }
 
+/* ── Network filters ─────────────────────────────────────────────────────── */
+.net-filters {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #1a1a1e;
+  border-bottom: 1px solid #2e2e33;
+  flex-shrink: 0;
+}
+.net-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.net-filter-group label {
+  font-size: 10px;
+  color: #6b6b76;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+}
+.net-filter-group select {
+  background: #242428;
+  color: #e2e2e6;
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 6px;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  cursor: pointer;
+  outline: none;
+}
+.net-filter-group select:focus {
+  border-color: #4c8dff;
+}
+
 /* ── Network panel ───────────────────────────────────────────────────────── */
 .net-table {
   width: 100%;
@@ -1279,8 +2201,21 @@ onUnmounted(() => {
 }
 
 .net-table :deep(.col-method) { width: 56px; }
-.net-table :deep(.col-status) { width: 52px; }
-.net-table :deep(.col-dur)    { width: 64px; text-align: right; }
+.net-table :deep(.col-status) { width: 48px; }
+.net-table :deep(.col-type)   { width: 52px; }
+.net-table :deep(.col-dur)    { width: 60px; text-align: right; }
+
+.net-table :deep(.net-type-badge) {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border: 1px solid;
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 16px;
+  opacity: 0.85;
+}
 
 .net-table :deep(.net-pending) { opacity: 0.25; }
 
@@ -1477,7 +2412,7 @@ onUnmounted(() => {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #f5c542;
+  background: #ff4070;
   border: 2px solid #111113;
   cursor: pointer;
   padding: 0;
@@ -1486,7 +2421,7 @@ onUnmounted(() => {
 }
 
 .cm-bubble:hover {
-  background: #ffd966;
+  background: #ff6b91;
   transform: translate(-50%, -50%) scale(1.3);
 }
 
@@ -1620,6 +2555,10 @@ onUnmounted(() => {
 .cm-thread {
   border-bottom: 1px solid #2e2e33;
   padding: 0;
+  transition: opacity 0.2s;
+}
+.cm-thread.cm-future {
+  opacity: 0.3;
 }
 
 .cm-msg {
@@ -1641,10 +2580,10 @@ onUnmounted(() => {
 }
 
 .cm-ts-btn {
-  background: rgba(245, 197, 66, 0.15);
+  background: rgba(255, 64, 112, 0.15);
   border: none;
   border-radius: 3px;
-  color: #f5c542;
+  color: #ff4070;
   cursor: pointer;
   font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   font-size: 10px;
@@ -1653,7 +2592,7 @@ onUnmounted(() => {
   transition: background 0.15s;
 }
 
-.cm-ts-btn:hover { background: rgba(245, 197, 66, 0.25); }
+.cm-ts-btn:hover { background: rgba(255, 64, 112, 0.25); }
 
 .cm-author {
   color: #e2e2e6;
@@ -1679,19 +2618,34 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
-.cm-reply-toggle {
-  background: none;
-  border: none;
-  color: #6b6b76;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 11px;
-  margin-top: 4px;
-  padding: 2px 0;
-  transition: color 0.15s;
+.cm-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
 }
 
-.cm-reply-toggle:hover { color: #4c8dff; }
+.cm-reply-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid #2e2e33;
+  border-radius: 4px;
+  color: #8b8b98;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 3px 8px 3px 6px;
+  transition: all 0.15s;
+}
+
+.cm-reply-toggle:hover {
+  color: #c8c8ce;
+  border-color: #48485a;
+  background: rgba(255, 255, 255, 0.03);
+}
 
 .cm-reply-form {
   background: rgba(255,255,255,0.02);
@@ -1721,4 +2675,251 @@ onUnmounted(() => {
 }
 
 .cm-cancel-btn:hover { color: #e2e2e6; border-color: #6b6b76; }
+
+/* ── Inspector detail panel ─────────────────────────────────────────────── */
+.inspect-panel {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  max-width: 420px;
+  max-height: 50%;
+  overflow-y: auto;
+  background: rgba(28, 28, 31, 0.96);
+  border: 1px solid #2e2e33;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.inspect-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.inspect-selector {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspect-tag { color: #f4844a; font-weight: 600; }
+.inspect-id { color: #4c8dff; }
+.inspect-cls { color: #3ecf8e; }
+
+.inspect-dims {
+  color: #6b6b76;
+  font-size: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.inspect-close {
+  background: none;
+  border: none;
+  color: #6b6b76;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+.inspect-close:hover { color: #e2e2e6; }
+
+.inspect-path {
+  color: #6b6b76;
+  font-size: 10px;
+  margin-bottom: 8px;
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.inspect-section {
+  margin-top: 8px;
+}
+
+.inspect-section-title {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #6b6b76;
+  margin-bottom: 4px;
+}
+
+.inspect-attrs,
+.inspect-styles {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px 0;
+}
+
+.inspect-attr-name {
+  color: #f4844a;
+  padding: 2px 8px 2px 0;
+  white-space: nowrap;
+}
+
+.inspect-attr-val {
+  color: #4c8dff;
+  padding: 2px 0;
+  word-break: break-all;
+}
+
+.inspect-style-prop {
+  color: #c8c8ce;
+  padding: 2px 8px 2px 0;
+  white-space: nowrap;
+}
+
+.inspect-style-val {
+  color: #3ecf8e;
+  padding: 2px 0;
+  word-break: break-all;
+}
+
+/* ── Comment input box with integrated pin ── */
+.cm-input-box {
+  border: 1px solid #2e2e33;
+  border-radius: 6px;
+  background: #111113;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.cm-input-box:focus-within {
+  border-color: #48485a;
+}
+.cm-input-box .cm-textarea {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  resize: none;
+}
+.cm-input-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 5px;
+  min-height: 24px;
+}
+
+.cm-pin-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: #55555f;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0 6px;
+}
+.cm-pin-label {
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cm-pin-btn:hover {
+  color: #93bbfd;
+  background: rgba(96, 165, 250, 0.1);
+}
+.cm-pin-btn--active {
+  color: #93bbfd;
+  background: rgba(96, 165, 250, 0.15);
+  animation: cm-pin-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes cm-pin-glow {
+  0%, 100% { box-shadow: 0 0 6px rgba(96, 165, 250, 0.2); }
+  50% { box-shadow: 0 0 12px rgba(96, 165, 250, 0.35); }
+}
+
+.cm-pick-inline-hint {
+  font-size: 10px;
+  color: rgba(96, 165, 250, 0.7);
+  animation: cm-pick-pulse 1.8s ease-in-out infinite;
+}
+
+/* Pinned element badge */
+.cm-pinned-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(96, 165, 250, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  border-radius: 3px;
+  padding: 2px 6px 2px 5px;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 10px;
+  color: #93bbfd;
+  max-width: calc(100% - 30px);
+}
+
+.cm-pinned-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cm-pinned-remove {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: #6b6b76;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  transition: color 0.15s;
+}
+.cm-pinned-remove:hover {
+  color: #f16370;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+@keyframes cm-pick-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.cm-element-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(76, 141, 255, 0.08);
+  border: 1px solid rgba(76, 141, 255, 0.20);
+  border-radius: 4px;
+  padding: 3px 7px 3px 5px;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 10px;
+  color: #7aabff;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cm-element-badge:hover {
+  background: rgba(76, 141, 255, 0.15);
+  border-color: rgba(76, 141, 255, 0.40);
+  color: #93bbfd;
+}
+
+.cm-element-badge svg {
+  flex-shrink: 0;
+}
 </style>

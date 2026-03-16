@@ -5,12 +5,12 @@ import { v4 as uuidv4 } from 'uuid'
 import { db, reelsDir } from '~/server/utils/db'
 
 interface WorkspaceRow { id: string; owner_id: string }
-interface ApiTokenRow { id: string; workspace_id: string }
+interface ApiTokenRow { id: string; app_id: string }
 
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')
 
-  // Auth: accept either a JWT user (dashboard) or a workspace API token (extension)
+  // Auth: accept either a JWT user (dashboard) or an app API token (extension)
   const user = event.context.user
 
   if (!user) {
@@ -23,11 +23,17 @@ export default defineEventHandler(async (event) => {
     if (!rawToken) throw createError({ statusCode: 401, message: 'Unauthorized' })
 
     const apiToken = db
-      .prepare('SELECT id, workspace_id FROM api_tokens WHERE token = ?')
+      .prepare('SELECT id, app_id FROM api_tokens WHERE token = ?')
       .get(rawToken) as ApiTokenRow | undefined
 
-    if (!apiToken || apiToken.workspace_id !== workspaceId) {
-      throw createError({ statusCode: 401, message: 'Invalid API token for this workspace' })
+    if (!apiToken) {
+      throw createError({ statusCode: 401, message: 'Invalid API token' })
+    }
+
+    // Verify the token's app belongs to this workspace
+    const app = db.prepare('SELECT workspace_id FROM apps WHERE id = ?').get(apiToken.app_id) as { workspace_id: string } | undefined
+    if (!app || app.workspace_id !== workspaceId) {
+      throw createError({ statusCode: 403, message: 'Token does not belong to this workspace' })
     }
     // API token is valid — skip ownership check below
   } else {

@@ -23,15 +23,36 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 403, message: 'Forbidden' })
   }
 
+  const query = getQuery(event)
+  const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 200)
+  const before = query.before ? Number(query.before) : null
+
+  const params: (string | number)[] = [appId]
+  let whereClause = 'WHERE r.app_id = ?'
+
+  if (before !== null) {
+    whereClause += ' AND r.created_at < ?'
+    params.push(before)
+  }
+
+  params.push(limit + 1)
+
   const reels = db
     .prepare(`
-      SELECT r.id, r.filename, r.original_name, r.size, r.created_at, u.email AS uploaded_by_email
+      SELECT r.id, r.filename, r.original_name, r.size, r.created_at,
+             COALESCE(r.reporter_email, u.email) AS uploaded_by_email,
+             r.reporter_name
       FROM reels r
       LEFT JOIN users u ON r.uploaded_by_user_id = u.id
-      WHERE r.app_id = ?
+      ${whereClause}
       ORDER BY r.created_at DESC
+      LIMIT ?
     `)
-    .all(appId)
+    .all(...params) as any[]
 
-  return reels
+  const hasMore = reels.length > limit
+  const items = hasMore ? reels.slice(0, limit) : reels
+  const nextBefore = hasMore ? items[items.length - 1].created_at : null
+
+  return { items, hasMore, nextBefore }
 })

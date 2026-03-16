@@ -19,6 +19,7 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const name = body?.name?.trim()
   if (!name) throw createError({ statusCode: 400, message: 'App name is required' })
+  if (name.length > 100) throw createError({ statusCode: 400, message: 'App name must be 100 characters or fewer' })
 
   const id = uuidv4()
   const created_at = Date.now()

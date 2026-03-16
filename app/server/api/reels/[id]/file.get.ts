@@ -1,6 +1,6 @@
-import { readFileSync } from 'fs'
+import { createReadStream, statSync } from 'fs'
 import { join } from 'path'
-import { send } from 'h3'
+import { sendStream } from 'h3'
 import { db, reelsDir } from '~/server/utils/db'
 import { getS3Config, presignedGetUrl } from '~/server/utils/s3'
 
@@ -43,7 +43,8 @@ export default defineEventHandler(async (event) => {
     .get(workspaceId) as WorkspaceRow | undefined
 
   if (!workspace || workspace.owner_id !== user.id) {
-    throw createError({ statusCode: 403, message: 'Forbidden' })
+    const member = db.prepare('SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?').get(workspaceId, user.id)
+    if (!member) throw createError({ statusCode: 403, message: 'Forbidden' })
   }
 
   // S3 mode: redirect to presigned GET URL
@@ -55,16 +56,17 @@ export default defineEventHandler(async (event) => {
   // Local disk mode
   const filePath = join(reelsDir, reel.filename)
 
-  let buffer: Buffer
+  let fileSize: number
   try {
-    buffer = readFileSync(filePath)
+    fileSize = statSync(filePath).size
   } catch {
     throw createError({ statusCode: 404, message: 'Reel file not found on disk' })
   }
 
   setResponseHeader(event, 'Content-Type', 'application/octet-stream')
   setResponseHeader(event, 'Content-Disposition', `attachment; filename="${reel.original_name || reel.filename}"`)
-  setResponseHeader(event, 'Content-Length', String(buffer.length))
+  setResponseHeader(event, 'Content-Length', String(fileSize))
 
-  return send(event, buffer)
+  const stream = createReadStream(filePath)
+  return sendStream(event, stream)
 })

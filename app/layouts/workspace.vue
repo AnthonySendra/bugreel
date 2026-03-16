@@ -83,6 +83,11 @@ function closeNewAppModal() {
     <!-- ── Top nav ──────────────────────────────────────────────────────────── -->
     <header class="h-14 border-b border-(--ui-border) px-5 flex items-center gap-1 shrink-0">
 
+      <!-- Logo / Home link -->
+      <NuxtLink to="/" class="flex items-center shrink-0 mr-3 group" title="Home">
+        <div class="w-3.5 h-3.5 rounded-full bg-bugreel-500 group-hover:bg-bugreel-400 transition-colors" />
+      </NuxtLink>
+
       <!-- Workspace selector -->
       <UDropdownMenu :items="workspaceItems">
         <button class="flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-(--ui-bg-elevated) transition-colors group cursor-pointer">

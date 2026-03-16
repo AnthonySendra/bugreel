@@ -39,7 +39,8 @@ export default defineEventHandler((event) => {
     .get(workspaceId) as WorkspaceRow | undefined
 
   if (!workspace || workspace.owner_id !== user.id) {
-    throw createError({ statusCode: 403, message: 'Forbidden' })
+    const member = db.prepare('SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?').get(workspaceId, user.id)
+    if (!member) throw createError({ statusCode: 403, message: 'Forbidden' })
   }
 
   return {
