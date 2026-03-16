@@ -12,6 +12,18 @@ No SaaS, no tracking, no vendor lock-in. Runs on your own infrastructure.
 
 ## Features
 
+### Viewer
+
+- **DOM replay** — pixel-perfect interactive replay powered by rrweb, not a video
+- **Scrubber** — seek anywhere in the timeline; all panels sync to the current position
+- **Console panel** — logs, warnings, errors and uncaught exceptions with timestamps; scrolls with playback
+- **Network panel** — all requests in a table; click any row to expand headers, request body, and status
+- **Interactions panel** — ordered list of clicks, inputs, and navigations with seek-to buttons
+- **Comments** — timestamped threaded comments; yellow bubbles on the timeline; reply notifications by email
+- **DOM inspector** — toggle Inspect mode to hover-highlight any element in the replay with tag, classes and dimensions; click to see attributes and computed styles
+- **Open DOM** — extract the current DOM snapshot into a new tab where browser DevTools work natively (no iframe context switching)
+- **Playwright export** — one click generates a ready-to-run `.spec.ts` reproduction script from the interaction events
+
 ### Recording
 
 | | Firefox extension | SDK (script tag) |
@@ -31,41 +43,11 @@ No SaaS, no tracking, no vendor lock-in. Runs on your own infrastructure.
 
 Recordings are saved as `.reel` files — gzipped JSON containing all streams.
 
-### Viewer
-
-- **DOM replay** — pixel-perfect interactive replay powered by rrweb, not a video
-- **Scrubber** — seek anywhere in the timeline; all panels sync to the current position
-- **Console panel** — logs, warnings, errors and uncaught exceptions with timestamps; scrolls with playback
-- **Network panel** — all requests in a table; click any row to expand headers, request body, and status
-- **Interactions panel** — ordered list of clicks, inputs, and navigations with seek-to buttons
-- **Comments** — timestamped threaded comments; yellow bubbles on the timeline; reply notifications by email
-- **DOM inspector** — toggle Inspect mode to hover-highlight any element in the replay with tag, classes and dimensions; click to see attributes and computed styles
-- **Open DOM** — extract the current DOM snapshot into a new tab where browser DevTools work natively (no iframe context switching)
-- **Playwright export** — one click generates a ready-to-run `.spec.ts` reproduction script from the interaction events
-
 ### Storage
 
 - **Database** — SQLite with WAL mode (`data/bugreel.db`)
 - **Reel files** — local disk by default (`data/reels/`), or any S3-compatible bucket (AWS S3, Cloudflare R2, MinIO)
 - **S3 uploads** — extension and SDK upload directly to S3 via presigned PUT URLs; viewer redirects to presigned GET URLs — the API server is never in the data path
-
----
-
-## Project structure
-
-```
-bugreel/
-├── app/          # Nuxt 4 web app (viewer + API)
-│   └── public/
-│       ├── sdk/recorder.js          # SDK served to end users
-│       └── recorder-lib/            # rrweb + fflate served by the app
-├── recorder/     # extension + SDK source
-│   ├── manifest.json
-│   ├── content.js / background.js / popup.*
-│   ├── lib/      # rrweb.min.js, fflate.min.js
-│   └── sdk/
-│       └── recorder.js              # SDK source
-```
 
 ---
 
@@ -132,14 +114,6 @@ docker compose up -d
 ```
 
 Edit `docker-compose.yml` to configure S3, email, and a public base URL. All options are pre-listed as comments.
-
-### Build locally
-
-```bash
-cd app
-docker build -t bugreel .
-docker run -d -p 7777:7777 -v bugreel_data:/app/data -e NUXT_JWT_SECRET=changeme bugreel
-```
 
 ### Persistent data
 
