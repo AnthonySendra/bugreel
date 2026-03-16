@@ -3,10 +3,10 @@ FROM node:24-alpine AS builder
 
 WORKDIR /build
 
-COPY package.json package-lock.json ./
+COPY app/package.json app/package-lock.json ./
 RUN npm ci
 
-COPY . .
+COPY app/ .
 RUN npm run build
 
 # ---- runtime stage ----

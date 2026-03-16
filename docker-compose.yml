@@ -1,5 +1,6 @@
 services:
   bugreel:
+    build: .
     image: patatra/bugreel:latest
     ports:
       - "7777:7777"
