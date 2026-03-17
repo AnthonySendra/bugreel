@@ -14,12 +14,12 @@ async function onSubmit() {
   error.value = ''
   loading.value = true
   try {
-    const data = await $fetch<{ token: string; user: { id: string; email: string } }>('/api/auth/register', {
+    const data = await $fetch<{ token: string; user: { id: string; email: string; email_verified: boolean } }>('/api/auth/register', {
       method: 'POST',
       body: { email: state.email, password: state.password },
     })
     login(data.token)
-    router.push('/dashboard')
+    router.push(data.user.email_verified ? '/dashboard' : '/verify-email')
   } catch (e: any) {
     error.value = e?.data?.message || e?.message || 'Registration failed'
   } finally {

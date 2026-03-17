@@ -68,6 +68,7 @@ const loading = ref(true)
 
 let recording: any = null
 let replayer: any = null
+let cachedRrwebEvents: any[] = []
 let totalDuration = 0
 let pageWidth = 1280
 let pageHeight = 720
@@ -142,7 +143,8 @@ function initViewer() {
   // Raw events: used for duration (includes bugreel-end marker)
   const rawEvents: any[] = recording.rrwebEvents || []
   // Sanitized events: passed to Replayer (bugreel-end filtered out, CORS links stripped)
-  const rrwebEvents = sanitizeRrwebEvents(rawEvents)
+  cachedRrwebEvents = sanitizeRrwebEvents(rawEvents)
+  const rrwebEvents = cachedRrwebEvents
 
   const metaEvent = rrwebEvents.find((e: any) => e.type === 4)
   pageWidth = metaEvent?.data?.width || 1280
@@ -217,8 +219,8 @@ function initViewer() {
   if (playBtnEl.value) playBtnEl.value.textContent = '▶'
 
   renderNetworkTable()
-  resetConsole()
-  resetInteractions()
+  renderAllConsole()
+  renderAllInteractions()
   updateUI(0)
   scheduleTick()
 }
@@ -387,37 +389,45 @@ function updateUI(t: number) {
 }
 
 // ── Console ───────────────────────────────────────────────────────────────────
-let lastConsoleIdx = 0
+let consoleRows: HTMLElement[] = []
 
-function resetConsole() {
-  if (consoleEntriesEl.value) consoleEntriesEl.value.innerHTML = ''
-  lastConsoleIdx = 0
+function renderAllConsole() {
+  if (!recording || !consoleEntriesEl.value) return
+  consoleEntriesEl.value.innerHTML = ''
+  const events = recording.consoleEvents || []
+  consoleRows = []
+  for (const ev of events) {
+    const row = buildConsoleEntry(ev)
+    row.classList.add('future')
+    row.dataset.time = String(ev.time)
+    consoleEntriesEl.value.appendChild(row)
+    consoleRows.push(row)
+  }
 }
 
 function updateConsole(t: number) {
-  if (!recording || !consoleEntriesEl.value) return
-  const events = recording.consoleEvents || []
-  if (lastConsoleIdx > 0 && events[lastConsoleIdx - 1]?.time > t) {
-    consoleEntriesEl.value.innerHTML = ''
-    lastConsoleIdx = 0
+  let lastPastIdx = -1
+  for (let i = 0; i < consoleRows.length; i++) {
+    const row = consoleRows[i]
+    if (Number(row.dataset.time) <= t) {
+      row.classList.remove('future')
+      lastPastIdx = i
+    } else {
+      row.classList.add('future')
+    }
   }
-  let appended = false
-  while (lastConsoleIdx < events.length && events[lastConsoleIdx].time <= t) {
-    consoleEntriesEl.value.appendChild(buildConsoleEntry(events[lastConsoleIdx]))
-    lastConsoleIdx++
-    appended = true
-  }
-  if (appended && clock.playing && consolePanelEl.value) {
-    consolePanelEl.value.scrollTop = consolePanelEl.value.scrollHeight
+  if (lastPastIdx >= 0 && clock.playing && consolePanelEl.value) {
+    consoleRows[lastPastIdx].scrollIntoView({ block: 'nearest' })
   }
 }
 
 function buildConsoleEntry(ev: any) {
   const row = document.createElement('div')
   row.className = `c-row c-${ev.level}`
-  const ts = document.createElement('span')
+  const ts = document.createElement('button')
   ts.className = 'c-ts'
   ts.textContent = fmtTime(ev.time)
+  ts.addEventListener('click', () => jumpToComment(ev.time))
   const badge = document.createElement('span')
   badge.className = 'c-badge'
   badge.textContent = ev.level.toUpperCase()
@@ -429,28 +439,35 @@ function buildConsoleEntry(ev: any) {
 }
 
 // ── Interactions ──────────────────────────────────────────────────────────────
-let lastInteractionIdx = 0
+let interactionRows: HTMLElement[] = []
 
-function resetInteractions() {
-  if (interactionsListEl.value) interactionsListEl.value.innerHTML = ''
-  lastInteractionIdx = 0
+function renderAllInteractions() {
+  if (!recording || !interactionsListEl.value) return
+  interactionsListEl.value.innerHTML = ''
+  const events = recording.interactionEvents || []
+  interactionRows = []
+  for (const ev of events) {
+    const row = buildInteractionEntry(ev)
+    row.classList.add('future')
+    row.dataset.time = String(ev.time)
+    interactionsListEl.value.appendChild(row)
+    interactionRows.push(row)
+  }
 }
 
 function updateInteractions(t: number) {
-  if (!recording || !interactionsListEl.value) return
-  const events = recording.interactionEvents || []
-  if (lastInteractionIdx > 0 && events[lastInteractionIdx - 1]?.time > t) {
-    interactionsListEl.value.innerHTML = ''
-    lastInteractionIdx = 0
+  let lastPastIdx = -1
+  for (let i = 0; i < interactionRows.length; i++) {
+    const row = interactionRows[i]
+    if (Number(row.dataset.time) <= t) {
+      row.classList.remove('future')
+      lastPastIdx = i
+    } else {
+      row.classList.add('future')
+    }
   }
-  let appended = false
-  while (lastInteractionIdx < events.length && events[lastInteractionIdx].time <= t) {
-    interactionsListEl.value.appendChild(buildInteractionEntry(events[lastInteractionIdx]))
-    lastInteractionIdx++
-    appended = true
-  }
-  if (appended && clock.playing && interactionsPanelEl.value) {
-    interactionsPanelEl.value.scrollTop = interactionsPanelEl.value.scrollHeight
+  if (lastPastIdx >= 0 && clock.playing && interactionsPanelEl.value) {
+    interactionRows[lastPastIdx].scrollIntoView({ block: 'nearest' })
   }
 }
 
@@ -786,18 +803,49 @@ async function submitReply(parentId: string) {
   }
 }
 
+function recreateReplayer() {
+  if (!playerMount.value || !cachedRrwebEvents.length) return
+  replayer?.destroy?.()
+  playerMount.value.innerHTML = ''
+  try {
+    const rrweb = (window as any).rrweb
+    replayer = new rrweb.Replayer(cachedRrwebEvents, {
+      root: playerMount.value,
+      speed: 1,
+      showWarning: false,
+      showDebug: false,
+      triggerFocus: false,
+      UNSAFE_replayCanvas: false,
+      pauseAnimation: true,
+      useVirtualDom: false,
+    })
+    injectCapturedFonts()
+    applyScale()
+  } catch (err) {
+    console.error('[bugreel] Replayer recreate failed', err)
+  }
+}
+
 function jumpToComment(timestampMs: number) {
   const wasPlaying = clock.playing
   clock.seek(timestampMs)
   if (seekerEl.value) seekerEl.value.value = String(timestampMs)
-  if (wasPlaying) {
-    replayer?.play(timestampMs)
-    clock.play(timestampMs)
-    scheduleTick()
-  } else {
-    replayer?.pause(timestampMs)
-    updateUI(timestampMs)
-  }
+
+  // Always recreate the replayer to avoid rrweb DocumentType bug on backward seek.
+  // After recreating, play from 0 first to let rrweb build the initial snapshot,
+  // then pause at the target offset after a frame.
+  recreateReplayer()
+  replayer?.play(0)
+  requestAnimationFrame(() => {
+    if (wasPlaying) {
+      replayer?.play(timestampMs)
+      clock.play(timestampMs)
+      scheduleTick()
+    } else {
+      replayer?.pause(timestampMs)
+      updateUI(timestampMs)
+    }
+  })
 }
 
 function fmtDate(ts: number) {
@@ -2066,6 +2114,7 @@ onUnmounted(() => {
 
 /* ── Console ─────────────────────────────────────────────────────────────── */
 #console-entries { padding: 2px 0; }
+:deep(.c-row.future) { opacity: 0.3; }
 
 :deep(.c-row) {
   display: flex;
@@ -2085,11 +2134,20 @@ onUnmounted(() => {
 :deep(.c-info)  { border-left-color: #4c8dff; }
 
 :deep(.c-ts) {
-  color: #6b6b76;
+  color: #ff4070;
   font-size: 10px;
+  font-weight: 600;
   flex-shrink: 0;
   min-width: 46px;
+  background: rgba(255, 64, 112, 0.15);
+  border: none;
+  border-radius: 3px;
+  padding: 1px 5px;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  transition: background 0.15s;
 }
+:deep(.c-ts:hover) { background: rgba(255, 64, 112, 0.25); }
 
 :deep(.c-badge) {
   flex-shrink: 0;
@@ -2427,6 +2485,7 @@ onUnmounted(() => {
 
 /* ── Interactions panel ──────────────────────────────────────────────────── */
 #interactions-list { padding: 2px 0; }
+:deep(.ix-row.future) { opacity: 0.3; }
 
 :deep(.ix-row) {
   display: flex;
@@ -2446,21 +2505,21 @@ onUnmounted(() => {
 :deep(.ix-click)    { border-left-color: #6b6b76; }
 
 :deep(.ix-ts) {
-  color: #f5c542;
+  color: #ff4070;
   font-size: 10px;
   font-weight: 600;
   flex-shrink: 0;
   min-width: 46px;
-  background: rgba(245, 197, 66, 0.12);
+  background: rgba(255, 64, 112, 0.15);
   border: none;
   border-radius: 3px;
   padding: 1px 5px;
   cursor: pointer;
-  font-family: inherit;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   transition: background 0.15s;
 }
 
-:deep(.ix-ts:hover) { background: rgba(245, 197, 66, 0.25); }
+:deep(.ix-ts:hover) { background: rgba(255, 64, 112, 0.25); }
 
 :deep(.ix-icon) {
   flex-shrink: 0;

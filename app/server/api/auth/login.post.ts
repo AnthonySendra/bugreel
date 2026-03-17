@@ -1,6 +1,5 @@
 import bcrypt from 'bcryptjs'
 import { db } from '~/server/utils/db'
-import { isEmailEnabled } from '~/server/utils/email'
 import { signUserToken } from '~/server/utils/jwt'
 import { checkRateLimit } from '~/server/utils/rate-limit'
 import { isValidEmail } from '~/server/utils/validate'
@@ -36,11 +35,6 @@ export default defineEventHandler(async (event) => {
   const valid = await bcrypt.compare(password, user.password_hash)
   if (!valid) {
     throw createError({ statusCode: 401, message: 'Invalid email or password' })
-  }
-
-  // Block login if email verification is required and not verified
-  if (isEmailEnabled() && !user.email_verified) {
-    throw createError({ statusCode: 403, message: 'Please verify your email before logging in.' })
   }
 
   const token = signUserToken({ id: user.id, email: user.email }, event)

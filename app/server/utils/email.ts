@@ -106,7 +106,7 @@ function baseUrl(): string {
 }
 
 export function sendVerificationEmail(to: string, token: string): Promise<void> {
-  const url = `${baseUrl()}/auth/verify-email?token=${token}`
+  const url = `${baseUrl()}/verify-email?token=${token}`
   return sendEmail({
     to,
     subject: 'Verify your email — Bugreel',

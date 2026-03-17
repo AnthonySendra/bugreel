@@ -24,6 +24,15 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Invalid email address' })
   }
 
+  // Check allowed email domains
+  const allowedDomains = (process.env.ALLOWED_EMAIL_DOMAINS || '').split(',').map(d => d.trim().toLowerCase()).filter(Boolean)
+  if (allowedDomains.length > 0) {
+    const emailDomain = email.toLowerCase().split('@')[1]
+    if (!emailDomain || !allowedDomains.some(d => emailDomain === d || emailDomain.endsWith('.' + d))) {
+      throw createError({ statusCode: 403, message: 'Registration is restricted to authorized email domains' })
+    }
+  }
+
   if (password.length < 6) {
     throw createError({ statusCode: 400, message: 'Password must be at least 6 characters' })
   }

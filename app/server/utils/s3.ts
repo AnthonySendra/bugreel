@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 export interface S3Config {
@@ -36,6 +36,13 @@ export async function presignedPutUrl(key: string, expiresIn = 3600): Promise<st
   if (!cfg) throw new Error('S3 not configured')
   const command = new PutObjectCommand({ Bucket: cfg.bucket, Key: key, ContentType: 'application/octet-stream' })
   return getSignedUrl(makeClient(cfg), command, { expiresIn })
+}
+
+export async function deleteObject(key: string): Promise<void> {
+  const cfg = getS3Config()
+  if (!cfg) throw new Error('S3 not configured')
+  const command = new DeleteObjectCommand({ Bucket: cfg.bucket, Key: key })
+  await makeClient(cfg).send(command)
 }
 
 export async function presignedGetUrl(key: string, expiresIn = 3600): Promise<string> {

@@ -144,6 +144,7 @@ Mount a named volume or host path to preserve data across container restarts.
 | `NUXT_EMAIL_SMTP_USER` | no | SMTP user |
 | `NUXT_EMAIL_SMTP_PASS` | no | SMTP password |
 | `NUXT_EMAIL_RESEND_API_KEY` | no | Resend API key |
+| `ALLOWED_EMAIL_DOMAINS` | no | Comma-separated list of allowed email domains for registration (e.g. `acme.com,example.io`) |
 
 ---
 

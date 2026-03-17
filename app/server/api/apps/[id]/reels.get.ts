@@ -26,6 +26,8 @@ export default defineEventHandler((event) => {
   const query = getQuery(event)
   const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 200)
   const before = query.before ? Number(query.before) : null
+  const from = query.from ? Number(query.from) : null
+  const to = query.to ? Number(query.to) : null
 
   const params: (string | number)[] = [appId]
   let whereClause = 'WHERE r.app_id = ?'
@@ -33,6 +35,16 @@ export default defineEventHandler((event) => {
   if (before !== null) {
     whereClause += ' AND r.created_at < ?'
     params.push(before)
+  }
+
+  if (from !== null && !isNaN(from)) {
+    whereClause += ' AND r.created_at >= ?'
+    params.push(from)
+  }
+
+  if (to !== null && !isNaN(to)) {
+    whereClause += ' AND r.created_at <= ?'
+    params.push(to)
   }
 
   params.push(limit + 1)

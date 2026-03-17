@@ -19,7 +19,34 @@ const hasMore = ref(false)
 const nextBefore = ref<number | null>(null)
 const loadingMore = ref(false)
 
-const { data: reelsData, refresh: refreshReelsData } = await useFetch<ReelsResponse>(`/api/apps/${props.appId}/reels`, { headers: headersRef })
+// ── Date range filter state ──────────────────────────────────────────────────
+const filterFrom = ref('')
+const filterTo = ref('')
+
+/** Convert YYYY-MM-DD string to epoch ms (start of day, local time) */
+function dateToEpoch(dateStr: string, endOfDay = false): number | undefined {
+  if (!dateStr) return undefined
+  const d = new Date(dateStr + 'T00:00:00')
+  if (isNaN(d.getTime())) return undefined
+  if (endOfDay) {
+    d.setHours(23, 59, 59, 999)
+  }
+  return d.getTime()
+}
+
+const fetchParams = computed(() => {
+  const p: Record<string, string | number> = {}
+  const from = dateToEpoch(filterFrom.value)
+  const to = dateToEpoch(filterTo.value, true)
+  if (from !== undefined) p.from = from
+  if (to !== undefined) p.to = to
+  return p
+})
+
+const { data: reelsData, refresh: refreshReelsData } = await useFetch<ReelsResponse>(`/api/apps/${props.appId}/reels`, {
+  headers: headersRef,
+  params: fetchParams,
+})
 
 if (reelsData.value) {
   allReels.value = reelsData.value.items
@@ -35,6 +62,17 @@ watch(reelsData, (val) => {
   }
 })
 
+// Re-fetch from scratch when date filters change (reset pagination)
+watch(fetchParams, async () => {
+  nextBefore.value = null
+  await refreshReelsData()
+  if (reelsData.value) {
+    allReels.value = reelsData.value.items
+    hasMore.value = reelsData.value.hasMore
+    nextBefore.value = reelsData.value.nextBefore
+  }
+})
+
 async function refreshReels() {
   await refreshReelsData()
 }
@@ -45,7 +83,7 @@ async function loadMore() {
   try {
     const data = await $fetch<ReelsResponse>(`/api/apps/${props.appId}/reels`, {
       headers: props.headers,
-      params: { before: nextBefore.value },
+      params: { before: nextBefore.value, ...fetchParams.value },
     })
     allReels.value = [...allReels.value, ...data.items]
     hasMore.value = data.hasMore
@@ -62,16 +100,7 @@ const sortedReels = computed(() =>
 )
 
 // ── Filters ──────────────────────────────────────────────────────────────────
-const filterDate = ref('all')
 const filterCreator = ref('all')
-
-const datePills = [
-  { label: 'All', value: 'all' },
-  { label: 'Today', value: 'today' },
-  { label: 'Week', value: 'week' },
-  { label: 'Month', value: 'month' },
-  { label: '3 months', value: '3months' },
-]
 
 const creators = computed(() => {
   const emails = new Set<string>()
@@ -91,32 +120,6 @@ const showCreatorFilter = computed(() => creators.value.length > 0)
 const filteredReels = computed(() => {
   let list = sortedReels.value
 
-  if (filterDate.value !== 'all') {
-    const now = new Date()
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    let cutoff: number
-    switch (filterDate.value) {
-      case 'today':
-        cutoff = today.getTime()
-        break
-      case 'week': {
-        const d = new Date(today)
-        d.setDate(d.getDate() - d.getDay())
-        cutoff = d.getTime()
-        break
-      }
-      case 'month':
-        cutoff = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
-        break
-      case '3months':
-        cutoff = new Date(now.getFullYear(), now.getMonth() - 3, 1).getTime()
-        break
-      default:
-        cutoff = 0
-    }
-    list = list.filter(r => r.created_at >= cutoff)
-  }
-
   if (filterCreator.value !== 'all') {
     list = list.filter(r => r.uploaded_by_email === filterCreator.value)
   }
@@ -124,10 +127,11 @@ const filteredReels = computed(() => {
   return list
 })
 
-const hasActiveFilters = computed(() => filterDate.value !== 'all' || filterCreator.value !== 'all')
+const hasActiveFilters = computed(() => filterFrom.value !== '' || filterTo.value !== '' || filterCreator.value !== 'all')
 
 function clearFilters() {
-  filterDate.value = 'all'
+  filterFrom.value = ''
+  filterTo.value = ''
   filterCreator.value = 'all'
 }
 
@@ -193,6 +197,37 @@ async function deleteReel() {
     await refreshReels()
   } finally {
     deleteLoading.value = false
+  }
+}
+
+// ── Rename reel ──────────────────────────────────────────────────────────
+const renameModalOpen = ref(false)
+const reelToRename = ref<Reel | null>(null)
+const renameValue = ref('')
+const renameLoading = ref(false)
+
+function openRename(reel: Reel, e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  reelToRename.value = reel
+  renameValue.value = reel.original_name || reel.filename || ''
+  renameModalOpen.value = true
+}
+
+async function renameReel() {
+  if (!reelToRename.value || !renameValue.value.trim()) return
+  renameLoading.value = true
+  try {
+    await $fetch(`/api/reels/${reelToRename.value.id}`, {
+      method: 'PATCH',
+      headers: props.headers,
+      body: { name: renameValue.value.trim() },
+    })
+    renameModalOpen.value = false
+    reelToRename.value = null
+    await refreshReels()
+  } finally {
+    renameLoading.value = false
   }
 }
 
@@ -270,19 +305,25 @@ function onFileInput(e: Event) {
     <!-- Filter bar -->
     <div v-if="sortedReels.length > 0" class="filter-bar">
       <div class="filter-left">
-        <div class="filter-pills">
-          <button
-            v-for="pill in datePills"
-            :key="pill.value"
-            class="filter-pill"
-            :class="{ 'filter-pill--active': filterDate === pill.value }"
-            @click="filterDate = pill.value"
-          >
-            {{ pill.label }}
-          </button>
+        <div class="filter-date-range">
+          <label class="filter-date-label">From</label>
+          <input
+            v-model="filterFrom"
+            type="date"
+            class="filter-date-input"
+            :max="filterTo || undefined"
+          />
+          <label class="filter-date-label">To</label>
+          <input
+            v-model="filterTo"
+            type="date"
+            class="filter-date-input"
+            :min="filterFrom || undefined"
+          />
         </div>
+      </div>
 
-        <div v-if="showCreatorFilter" class="filter-divider" />
+      <div class="filter-right">
         <USelectMenu
           v-if="showCreatorFilter"
           v-model="filterCreator"
@@ -291,9 +332,7 @@ function onFileInput(e: Event) {
           class="filter-creator"
           size="xs"
         />
-      </div>
-
-      <div class="filter-right">
+        <div v-if="showCreatorFilter" class="filter-divider" />
         <span class="filter-count">{{ filteredReels.length }}<span class="filter-count-label"> reel{{ filteredReels.length !== 1 ? 's' : '' }}</span></span>
         <button
           v-if="hasActiveFilters"
@@ -400,14 +439,24 @@ function onFileInput(e: Event) {
                   <template v-if="reel.reporter_name || reel.uploaded_by_email"> · {{ reel.reporter_name || reel.uploaded_by_email }}</template>
                 </p>
               </NuxtLink>
-              <UButton
-                icon="i-lucide-trash-2"
-                size="xs"
-                color="error"
-                variant="ghost"
-                class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                @click="confirmDelete(reel, $event)"
-              />
+              <div class="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                <UButton
+                  icon="i-lucide-pencil"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  title="Rename"
+                  @click="openRename(reel, $event)"
+                />
+                <UButton
+                  icon="i-lucide-trash-2"
+                  size="xs"
+                  color="error"
+                  variant="ghost"
+                  title="Delete"
+                  @click="confirmDelete(reel, $event)"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -440,6 +489,29 @@ function onFileInput(e: Event) {
         <div class="flex justify-end gap-2 w-full">
           <UButton label="Cancel" color="neutral" variant="outline" @click="deleteModalOpen = false" />
           <UButton label="Delete" color="error" :loading="deleteLoading" @click="deleteReel" />
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Rename modal -->
+    <UModal v-model:open="renameModalOpen" title="Rename recording">
+      <template #body>
+        <div class="space-y-4">
+          <UFormField label="Name" name="name">
+            <UInput
+              v-model="renameValue"
+              placeholder="Recording name"
+              class="w-full"
+              autofocus
+              @keyup.enter="renameReel"
+            />
+          </UFormField>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2 w-full">
+          <UButton label="Cancel" color="neutral" variant="outline" @click="renameModalOpen = false" />
+          <UButton label="Rename" :loading="renameLoading" :disabled="!renameValue.trim()" @click="renameReel" />
         </div>
       </template>
     </UModal>
@@ -491,36 +563,37 @@ function onFileInput(e: Event) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex: 1;
   min-width: 0;
 }
-.filter-pills {
+.filter-date-range {
   display: flex;
-  gap: 2px;
-  background: var(--ui-bg);
-  border-radius: 0.375rem;
-  padding: 2px;
+  align-items: center;
+  gap: 0.375rem;
 }
-.filter-pill {
-  padding: 0.25rem 0.625rem;
-  border-radius: 0.3rem;
+.filter-date-label {
   font-size: 0.6875rem;
   font-weight: 600;
-  letter-spacing: 0.01em;
   color: var(--ui-text-dimmed);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: all 0.12s;
   white-space: nowrap;
 }
-.filter-pill:hover {
-  color: var(--ui-text-muted);
+.filter-date-input {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--ui-text-highlighted);
+  background: var(--ui-bg);
+  border: 1px solid var(--ui-border);
+  outline: none;
+  transition: border-color 0.12s;
+  width: 8.5rem;
 }
-.filter-pill--active {
-  background: rgba(255, 64, 112, 0.12);
-  color: #ff4070;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+.filter-date-input:focus {
+  border-color: #ff4070;
+}
+.filter-date-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.6);
+  cursor: pointer;
 }
 .filter-divider {
   width: 1px;

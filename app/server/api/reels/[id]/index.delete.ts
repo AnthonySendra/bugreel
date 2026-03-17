@@ -1,6 +1,7 @@
 import { unlinkSync } from 'fs'
 import { join } from 'path'
 import { db, reelsDir } from '~/server/utils/db'
+import { getS3Config, deleteObject } from '~/server/utils/s3'
 
 interface ReelRow {
   id: string
@@ -15,7 +16,7 @@ interface WorkspaceRow {
   owner_id: string
 }
 
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const user = event.context.user
   if (!user) throw createError({ statusCode: 401, message: 'Unauthorized' })
 
@@ -35,6 +36,16 @@ export default defineEventHandler((event) => {
 
   if (!workspace || workspace.owner_id !== user.id) {
     throw createError({ statusCode: 403, message: 'Forbidden' })
+  }
+
+  // Delete file from S3 if configured
+  const s3 = getS3Config()
+  if (s3) {
+    try {
+      await deleteObject(reel.filename)
+    } catch {
+      // S3 deletion failed — continue with local cleanup
+    }
   }
 
   // Delete file from disk
