@@ -21,7 +21,8 @@ export function useAppTokens(appId: string, headers: ComputedRef<Record<string, 
 
   const sdkSnippetText = computed(() => {
     if (!endpointUrl.value) return ''
-    return '<script src="' + origin + '/sdk/recorder.js" data-endpoint="' + endpointUrl.value + '"></' + 'script>'
+    const tag = 'script'
+    return `<${tag} src="${origin}/sdk/recorder.js" data-endpoint="${endpointUrl.value}"></${tag}>`
   })
 
   async function copyTokenValue(val: string) {

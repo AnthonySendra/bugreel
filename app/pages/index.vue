@@ -1,4 +1,7 @@
 <script setup lang="ts">
+const { token } = useAuth()
+const isLoggedIn = computed(() => !!token.value)
+
 const copied = ref<string | null>(null)
 
 function copyToClipboard(text: string, id: string) {
@@ -18,8 +21,13 @@ function copyToClipboard(text: string, id: string) {
           <span class="text-lg font-semibold tracking-tight text-white">bugreel</span>
         </NuxtLink>
         <div class="flex items-center gap-3">
-          <UButton to="/login" variant="ghost" color="neutral" size="sm" label="Sign in" />
-          <UButton to="/register" size="sm" label="Get started" />
+          <template v-if="isLoggedIn">
+            <UButton to="/dashboard" size="sm" label="Dashboard" />
+          </template>
+          <template v-else>
+            <UButton to="/login" variant="ghost" color="neutral" size="sm" label="Sign in" />
+            <UButton to="/register" size="sm" label="Get started" />
+          </template>
         </div>
       </div>
     </nav>
@@ -38,7 +46,8 @@ function copyToClipboard(text: string, id: string) {
           Capture DOM, console, network &amp; interactions as a structured, replayable recording &mdash; not a video. Self-hosted, no vendor lock-in.
         </p>
         <div class="flex items-center justify-center gap-4 pt-2">
-          <UButton to="/register" size="lg" label="Create an account" />
+          <UButton v-if="isLoggedIn" to="/dashboard" size="lg" label="Dashboard" />
+          <UButton v-else to="/register" size="lg" label="Create an account" />
           <UButton href="#setup" size="lg" variant="outline" color="neutral" label="Setup guide" />
         </div>
       </div>
@@ -226,8 +235,13 @@ function copyToClipboard(text: string, id: string) {
       <div class="max-w-5xl mx-auto flex items-center justify-between">
         <span class="text-xs text-neutral-600">bugreel &mdash; self-hosted bug recording</span>
         <div class="flex items-center gap-4">
-          <UButton to="/login" variant="link" color="neutral" size="xs" label="Sign in" />
-          <UButton to="/register" variant="link" color="neutral" size="xs" label="Register" />
+          <template v-if="isLoggedIn">
+            <UButton to="/dashboard" variant="link" color="neutral" size="xs" label="Dashboard" />
+          </template>
+          <template v-else>
+            <UButton to="/login" variant="link" color="neutral" size="xs" label="Sign in" />
+            <UButton to="/register" variant="link" color="neutral" size="xs" label="Register" />
+          </template>
         </div>
       </div>
     </footer>

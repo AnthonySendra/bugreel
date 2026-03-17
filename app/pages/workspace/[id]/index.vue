@@ -72,17 +72,6 @@ const onboardingStep = computed(() => {
 })
 const showOnboarding = computed(() => onboardingStep.value <= 3)
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function timeAgo(ts: number) {
-  const diff = Date.now() - ts
-  const m = Math.floor(diff / 60000)
-  const h = Math.floor(m / 60)
-  const d = Math.floor(h / 24)
-  if (d > 0) return `${d}d ago`
-  if (h > 0) return `${h}h ago`
-  if (m > 0) return `${m}m ago`
-  return 'just now'
-}
 // ── New app modal ─────────────────────────────────────────────────────────────
 const newAppModalOpen = ref(false)
 const newAppName = ref('')
