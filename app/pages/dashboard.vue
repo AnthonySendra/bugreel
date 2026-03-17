@@ -63,7 +63,7 @@ const hasWorkspaces = computed(() => (workspaces.value?.length || 0) > 0)
 </script>
 
 <template>
-  <div class="min-h-screen bg-(--ui-bg) dash-page">
+  <div class="min-h-screen bg-(--ui-bg) dash-page flex flex-col">
     <div class="max-w-4xl mx-auto px-6 py-10 space-y-10">
 
       <!-- Header -->
@@ -231,6 +231,14 @@ const hasWorkspaces = computed(() => (workspaces.value?.length || 0) > 0)
         </div>
       </template>
     </UModal>
+
+    <!-- Footer -->
+    <footer class="border-t border-(--ui-border) py-4 px-6 mt-auto">
+      <div class="max-w-4xl mx-auto flex items-center justify-between">
+        <span class="text-xs text-(--ui-text-dimmed)">bugreel — self-hosted bug recording</span>
+        <UButton href="https://github.com/AnthonySendra/bugreel" target="_blank" variant="link" color="neutral" size="xs" icon="i-lucide-github" label="GitHub" />
+      </div>
+    </footer>
   </div>
 </template>
 

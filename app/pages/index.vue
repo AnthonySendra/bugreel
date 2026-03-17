@@ -21,6 +21,7 @@ function copyToClipboard(text: string, id: string) {
           <span class="text-lg font-semibold tracking-tight text-white">bugreel</span>
         </NuxtLink>
         <div class="flex items-center gap-3">
+          <UButton href="https://github.com/AnthonySendra/bugreel" target="_blank" variant="ghost" color="neutral" size="sm" icon="i-lucide-github" label="GitHub" />
           <template v-if="isLoggedIn">
             <UButton to="/dashboard" size="sm" label="Dashboard" />
           </template>
@@ -49,6 +50,7 @@ function copyToClipboard(text: string, id: string) {
           <UButton v-if="isLoggedIn" to="/dashboard" size="lg" label="Dashboard" />
           <UButton v-else to="/register" size="lg" label="Create an account" />
           <UButton href="#setup" size="lg" variant="outline" color="neutral" label="Setup guide" />
+          <UButton href="https://github.com/AnthonySendra/bugreel" target="_blank" size="lg" variant="outline" color="neutral" icon="i-lucide-github" label="GitHub" />
         </div>
       </div>
     </section>
@@ -235,6 +237,7 @@ function copyToClipboard(text: string, id: string) {
       <div class="max-w-5xl mx-auto flex items-center justify-between">
         <span class="text-xs text-neutral-600">bugreel &mdash; self-hosted bug recording</span>
         <div class="flex items-center gap-4">
+          <UButton href="https://github.com/AnthonySendra/bugreel" target="_blank" variant="link" color="neutral" size="xs" icon="i-lucide-github" label="GitHub" />
           <template v-if="isLoggedIn">
             <UButton to="/dashboard" variant="link" color="neutral" size="xs" label="Dashboard" />
           </template>

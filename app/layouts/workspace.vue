@@ -126,7 +126,15 @@ function closeNewAppModal() {
     </header>
 
     <!-- ── Page content (tabs + body injected by each page) ─────────────────── -->
-    <slot />
+    <div class="flex-1">
+      <slot />
+    </div>
+
+    <!-- ── Footer ────────────────────────────────────────────────────────────── -->
+    <footer class="border-t border-(--ui-border) py-4 px-5 flex items-center justify-between shrink-0">
+      <span class="text-xs text-(--ui-text-dimmed)">bugreel — self-hosted bug recording</span>
+      <UButton href="https://github.com/AnthonySendra/bugreel" target="_blank" variant="link" color="neutral" size="xs" icon="i-lucide-github" label="GitHub" />
+    </footer>
 
     <!-- ── New app modal ────────────────────────────────────────────────────── -->
     <UModal v-model:open="newAppModalOpen" title="Create app" @close="closeNewAppModal">
