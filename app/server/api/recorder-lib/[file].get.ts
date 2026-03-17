@@ -15,7 +15,7 @@ export default defineEventHandler((event) => {
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'public, max-age=3600',
     })
-    return content
+    return send(event, content, 'text/javascript; charset=utf-8')
   } catch {
     throw createError({ statusCode: 404, message: 'Not found' })
   }
