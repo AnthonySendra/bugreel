@@ -1,5 +1,6 @@
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { readFileSync, existsSync } from 'fs'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 
 export default defineEventHandler((event) => {
   const file = getRouterParam(event, 'file')
@@ -7,16 +8,22 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 404, message: 'Not found' })
   }
 
-  const filePath = join(process.cwd(), 'public', 'recorder-lib', file)
-  try {
-    const content = readFileSync(filePath, 'utf-8')
-    setResponseHeaders(event, {
-      'Content-Type': 'text/javascript; charset=utf-8',
-      'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=3600',
-    })
-    return send(event, content, 'text/javascript; charset=utf-8')
-  } catch {
-    throw createError({ statusCode: 404, message: 'Not found' })
+  // Try multiple paths: dev (public/) and production (.output/public/)
+  const candidates = [
+    join(process.cwd(), 'public', 'recorder-lib', file),
+    join(process.cwd(), '.output', 'public', 'recorder-lib', file),
+  ]
+
+  for (const filePath of candidates) {
+    if (existsSync(filePath)) {
+      const content = readFileSync(filePath, 'utf-8')
+      setResponseHeaders(event, {
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=3600',
+      })
+      return send(event, content, 'text/javascript; charset=utf-8')
+    }
   }
+
+  throw createError({ statusCode: 404, message: 'Not found' })
 })
