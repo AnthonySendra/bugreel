@@ -8,6 +8,12 @@ No SaaS, no tracking, no vendor lock-in. Runs on your own infrastructure.
 
 ![bugreel demo](demo.gif)
 
+## Why?
+
+Tools like [jam.dev](https://jam.dev) are great for capturing bugs, but they're SaaS — your DOM snapshots, console logs, and network requests all end up on someone else's servers. For companies that handle sensitive data or simply don't want to send internal app state to a third party, that's a dealbreaker.
+
+I looked for a self-hostable equivalent and couldn't find one. So Claude built this.
+
 ---
 
 ## Features
