@@ -242,7 +242,7 @@ async function removeMember(userId: string) {
       <template v-if="activeTab === 'apps'">
         <div class="section-header">
           <h1 class="section-title">Applications</h1>
-          <UButton v-if="isOwner" label="New app" icon="i-lucide-plus" size="sm" @click="newAppModalOpen = true" />
+          <UButton label="New app" icon="i-lucide-plus" size="sm" @click="newAppModalOpen = true" />
         </div>
 
         <div v-if="!hasApps" class="empty-state">
@@ -288,19 +288,17 @@ async function removeMember(userId: string) {
         </div>
 
         <div class="space-y-5">
-          <!-- Add member (owner only) -->
-          <template v-if="isOwner">
-            <div class="flex gap-2">
-              <UInput
-                v-model="inviteEmail"
-                placeholder="colleague@example.com"
-                class="flex-1"
-                @keyup.enter="inviteMember"
-              />
-              <UButton label="Add" :loading="inviteLoading" :disabled="!inviteEmail.trim()" @click="inviteMember" />
-            </div>
-            <UAlert v-if="inviteError" color="error" variant="soft" :description="inviteError" />
-          </template>
+          <!-- Add member -->
+          <div class="flex gap-2">
+            <UInput
+              v-model="inviteEmail"
+              placeholder="colleague@example.com"
+              class="flex-1"
+              @keyup.enter="inviteMember"
+            />
+            <UButton label="Add" :loading="inviteLoading" :disabled="!inviteEmail.trim()" @click="inviteMember" />
+          </div>
+          <UAlert v-if="inviteError" color="error" variant="soft" :description="inviteError" />
 
           <!-- Members list -->
           <div class="members-list">
@@ -324,7 +322,6 @@ async function removeMember(userId: string) {
               </div>
               <span class="text-sm text-(--ui-text) flex-1">{{ member.email }}</span>
               <UButton
-                v-if="isOwner"
                 icon="i-lucide-x"
                 size="xs"
                 color="error"

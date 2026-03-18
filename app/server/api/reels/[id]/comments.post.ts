@@ -1,31 +1,22 @@
 import { db } from '~/server/utils/db'
 import { randomUUID } from 'crypto'
 import { sendCommentReplyEmail, sendNewCommentOnReelEmail } from '~/server/utils/email'
+import { requireReelAccess } from '~/server/utils/workspace-access'
 
-interface ReelRow { id: string; workspace_id: string; app_id: string | null; uploaded_by_user_id: string | null }
-interface WorkspaceRow { id: string; owner_id: string }
 interface UserRow { id: string; email: string }
 
 export default defineEventHandler(async (event) => {
   const user = event.context.user
   if (!user) throw createError({ statusCode: 401, message: 'Unauthorized' })
 
-  const reelId = getRouterParam(event, 'id')
+  const reelId = getRouterParam(event, 'id')!
   const body = await readBody(event) as { content?: string; timestamp_ms?: number; parent_id?: string; element_info?: string }
 
   if (!body.content?.trim()) throw createError({ statusCode: 400, message: 'content is required' })
   if (body.content.length > 5000) throw createError({ statusCode: 400, message: 'Comment content must be 5000 characters or fewer' })
   if (body.timestamp_ms == null) throw createError({ statusCode: 400, message: 'timestamp_ms is required' })
 
-  const reel = db.prepare('SELECT id, workspace_id, app_id, uploaded_by_user_id FROM reels WHERE id = ?').get(reelId) as ReelRow | undefined
-  if (!reel) throw createError({ statusCode: 404, message: 'Reel not found' })
-
-  const workspaceId = reel.workspace_id
-  const workspace = db.prepare('SELECT id, owner_id FROM workspaces WHERE id = ?').get(workspaceId) as WorkspaceRow | undefined
-  if (!workspace || workspace.owner_id !== user.id) {
-    const member = db.prepare('SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?').get(workspaceId, user.id)
-    if (!member) throw createError({ statusCode: 403, message: 'Forbidden' })
-  }
+  const { reel } = requireReelAccess(reelId, user.id)
 
   const id = randomUUID()
   const now = Date.now()

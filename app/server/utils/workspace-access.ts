@@ -28,6 +28,23 @@ export function requireWorkspaceAccess(workspaceId: string, userId: string): { w
 }
 
 /**
+ * Resolve a reel's workspace and check user access.
+ * Throws 404 if reel not found, 403 if no access.
+ */
+export function requireReelAccess(reelId: string, userId: string): { reel: any; workspaceId: string } {
+  const reel = db
+    .prepare('SELECT r.*, a.workspace_id AS app_workspace_id FROM reels r LEFT JOIN apps a ON r.app_id = a.id WHERE r.id = ?')
+    .get(reelId) as any
+
+  if (!reel) throw createError({ statusCode: 404, message: 'Reel not found' })
+
+  const workspaceId = reel.app_workspace_id || reel.workspace_id
+  requireWorkspaceAccess(workspaceId, userId)
+
+  return { reel, workspaceId }
+}
+
+/**
  * Check if a user is the owner of a workspace.
  * Throws 404 if workspace doesn't exist, 403 if not owner.
  */

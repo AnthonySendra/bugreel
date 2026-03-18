@@ -1,7 +1,7 @@
 import { db } from '~/server/utils/db'
+import { requireWorkspaceAccess } from '~/server/utils/workspace-access'
 
 interface AppRow { id: string; workspace_id: string }
-interface WorkspaceRow { id: string; owner_id: string }
 
 export default defineEventHandler((event) => {
   const user = event.context.user
@@ -15,13 +15,7 @@ export default defineEventHandler((event) => {
 
   if (!app) throw createError({ statusCode: 404, message: 'App not found' })
 
-  const workspace = db
-    .prepare('SELECT id, owner_id FROM workspaces WHERE id = ?')
-    .get(app.workspace_id) as WorkspaceRow | undefined
-
-  if (!workspace || workspace.owner_id !== user.id) {
-    throw createError({ statusCode: 403, message: 'Forbidden' })
-  }
+  requireWorkspaceAccess(app.workspace_id, user.id)
 
   const query = getQuery(event)
   const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 200)

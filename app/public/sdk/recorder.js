@@ -77,6 +77,7 @@
       // Try <script> tag first, fall back to fetch+eval for cross-origin
       var s = doc.createElement('script');
       s.src = src;
+      s.crossOrigin = 'anonymous';
       s.setAttribute('data-bugreel-src', src);
       s.onload = resolve;
       s.onerror = function () {
@@ -605,6 +606,8 @@
       '#__br_btn.br-recording{background:#1a1a1a;border:1px solid #444;opacity:1}',
       '#__br_btn.br-recording:hover{background:#2d2d2d}',
       '#__br_btn.br-saving{background:#1a1a1a;border:1px solid #444;opacity:.65;cursor:default}',
+      '#__br_btn.br-done{background:#16a34a;opacity:1;cursor:default}',
+      '#__br_btn.br-done:hover{background:#16a34a}',
       '</style>',
       '<button id="__br_btn">',
         '<span id="__br_label">⏺ Record Bug</span>',
@@ -621,7 +624,7 @@
     var lbl = doc.getElementById('__br_label');
     if (!btn) return;
     btn.className = cls ? 'br-' + cls : '';
-    btn.disabled = cls === 'saving';
+    btn.disabled = cls === 'saving' || cls === 'done';
     if (label !== undefined) lbl.textContent = label;
   }
 
@@ -760,6 +763,7 @@
     if (!storageRes.ok) throw new Error('Storage check failed: ' + storageRes.status);
     var storageData = await storageRes.json();
 
+    var reelId;
     if (storageData.storage === 's3') {
       var urlPayload = { originalName: filename };
       if (_reporter.email) urlPayload.reporter_email = _reporter.email;
@@ -771,6 +775,7 @@
       });
       if (!urlRes.ok) throw new Error('Upload URL failed: ' + urlRes.status);
       var urlData = await urlRes.json();
+      reelId = urlData.id;
       var putRes = await _origFetch(urlData.uploadUrl, {
         method: 'PUT',
         body: body,
@@ -787,7 +792,10 @@
         body: form,
       });
       if (!uploadRes.ok) throw new Error('Upload failed: ' + uploadRes.status);
+      var uploadData = await uploadRes.json();
+      reelId = uploadData.id;
     }
+    return reelId;
   }
 
   function downloadLocally(recording) {
@@ -839,8 +847,8 @@
       // Load rrweb + fflate from the configured host, then mount the widget
       var base = cfg.host.replace(/\/$/, '');
       Promise.all([
-        loadScript(base + '/api/recorder-lib/rrweb.min.js'),
-        loadScript(base + '/api/recorder-lib/fflate.min.js'),
+        loadScript(base + '/recorder-lib/rrweb.min.js'),
+        loadScript(base + '/recorder-lib/fflate.min.js'),
       ]).then(function () {
         if (doc.body) {
           createWidget();
@@ -1019,10 +1027,12 @@
         // Ask who is reporting if not already identified
         if (!_reporter.email) await promptReporter();
         try {
-          await compressAndUpload(recording);
+          var reelId = await compressAndUpload(recording);
+          var reelUrl = cfg.host + '/reel/' + reelId;
+          try { await navigator.clipboard.writeText(reelUrl); } catch (_) {}
           if (cfg.widget !== false) {
-            setWidget('', '✓ Uploaded!');
-            setTimeout(function () { setWidget('', '⏺ Record Bug'); }, 3000);
+            setWidget('done', '✓ Link copied!');
+            setTimeout(function () { setWidget('', '⏺ Record Bug'); }, 4000);
           }
         } catch (err) {
           console.error('[bugreel] Upload failed:', err);

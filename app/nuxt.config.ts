@@ -48,14 +48,6 @@ export default defineNuxtConfig({
       '/sdk/**': {
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        },
-      },
-      '/recorder-lib/**': {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, OPTIONS',
         },
       },
       '/workspace/**': { ssr: false },
