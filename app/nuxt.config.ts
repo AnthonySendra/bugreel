@@ -33,7 +33,7 @@ export default defineNuxtConfig({
   devServer: { port: 7777, host: '::' },
   vite: {
     server: {
-      cors: true,
+      cors: false,
     },
   },
   colorMode: { preference: 'dark' },
@@ -48,6 +48,7 @@ export default defineNuxtConfig({
       '/sdk/**': {
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Access-Control-Allow-Origin': '*',
         },
       },
       '/workspace/**': { ssr: false },

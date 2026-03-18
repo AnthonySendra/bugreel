@@ -1,12 +1,13 @@
 export default defineEventHandler((event) => {
   const path = event.path
 
-  // CORS headers for SDK, recorder libs, and API endpoints used by SDK/extension
+  // CORS headers for API routes used by SDK/extension.
+  // Static files (/sdk/*) get CORS via Nitro route rules
+  // in nuxt.config.ts (route rules are baked into the build and apply even
+  // when Nitro serves static assets directly, bypassing middleware).
   if (
-    path.startsWith('/sdk/') ||
-    path.startsWith('/recorder-lib/') ||
-    path.startsWith('/api/recorder-lib/') ||
-    path.startsWith('/api/apps/')
+    path.startsWith('/api/apps/') ||
+    path.startsWith('/api/ingest/')
   ) {
     setResponseHeaders(event, {
       'Access-Control-Allow-Origin': '*',

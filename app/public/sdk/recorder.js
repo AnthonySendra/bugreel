@@ -847,8 +847,8 @@
       // Load rrweb + fflate from the configured host, then mount the widget
       var base = cfg.host.replace(/\/$/, '');
       Promise.all([
-        loadScript(base + '/recorder-lib/rrweb.min.js'),
-        loadScript(base + '/recorder-lib/fflate.min.js'),
+        loadScript(base + '/sdk/rrweb.min.js'),
+        loadScript(base + '/sdk/fflate.min.js'),
       ]).then(function () {
         if (doc.body) {
           createWidget();
@@ -903,7 +903,7 @@
               var r = entries[i];
               var name = r.name || '';
               // Skip bugreel's own requests
-              if (name.indexOf('/recorder-lib/') !== -1) continue;
+              if (name.indexOf('/sdk/') !== -1) continue;
               if (name.indexOf('/sdk/recorder') !== -1) continue;
               if (name.indexOf('/api/apps/') !== -1 && name.indexOf('/reels') !== -1) continue;
               if (name.indexOf('/api/sdk-bundle') !== -1) continue;
