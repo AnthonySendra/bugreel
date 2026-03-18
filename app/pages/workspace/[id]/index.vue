@@ -12,13 +12,16 @@ const headers = computed(() =>
 interface App { id: string; name: string; created_at: number }
 interface Member { id: string; email: string; created_at: number }
 
-interface Workspace { id: string; name: string }
+interface Workspace { id: string; name: string; role: 'owner' | 'member' }
 
 const { data: workspaces } = await useFetch<Workspace[]>('/api/workspaces', { headers })
 const workspace = computed(() => workspaces.value?.find(w => w.id === workspaceId))
+const isOwner = computed(() => workspace.value?.role === 'owner')
 
 const { data: apps, refresh: refreshApps } = await useFetch<App[]>(`/api/workspaces/${workspaceId}/apps`, { headers })
-const { data: members, refresh: refreshMembers } = await useFetch<Member[]>(`/api/workspaces/${workspaceId}/members`, { headers })
+const { data: membersData, refresh: refreshMembers } = await useFetch<{ owner: { id: string; email: string }; members: Member[] }>(`/api/workspaces/${workspaceId}/members`, { headers })
+const members = computed(() => membersData.value?.members || [])
+const ownerEmail = computed(() => membersData.value?.owner?.email || '')
 
 // ── Rename workspace ─────────────────────────────────────────────────────────
 const editWsName = ref('')
@@ -58,11 +61,16 @@ watch(activeTab, (tab) => {
   navigateTo({ hash }, { replace: true })
 })
 
-const tabs = [
-  { key: 'apps', label: 'Applications', icon: 'i-lucide-layout-grid' },
-  { key: 'team', label: 'Team', icon: 'i-lucide-users' },
-  { key: 'settings', label: 'Settings', icon: 'i-lucide-settings' },
-]
+const tabs = computed(() => {
+  const items = [
+    { key: 'apps', label: 'Applications', icon: 'i-lucide-layout-grid' },
+    { key: 'team', label: 'Team', icon: 'i-lucide-users' },
+  ]
+  if (isOwner.value) {
+    items.push({ key: 'settings', label: 'Settings', icon: 'i-lucide-settings' })
+  }
+  return items
+})
 
 // ── Onboarding state ─────────────────────────────────────────────────────────
 const hasApps = computed(() => (apps.value?.length || 0) > 0)
@@ -234,7 +242,7 @@ async function removeMember(userId: string) {
       <template v-if="activeTab === 'apps'">
         <div class="section-header">
           <h1 class="section-title">Applications</h1>
-          <UButton label="New app" icon="i-lucide-plus" size="sm" @click="newAppModalOpen = true" />
+          <UButton v-if="isOwner" label="New app" icon="i-lucide-plus" size="sm" @click="newAppModalOpen = true" />
         </div>
 
         <div v-if="!hasApps" class="empty-state">
@@ -280,26 +288,28 @@ async function removeMember(userId: string) {
         </div>
 
         <div class="space-y-5">
-          <!-- Add member -->
-          <div class="flex gap-2">
-            <UInput
-              v-model="inviteEmail"
-              placeholder="colleague@example.com"
-              class="flex-1"
-              @keyup.enter="inviteMember"
-            />
-            <UButton label="Add" :loading="inviteLoading" :disabled="!inviteEmail.trim()" @click="inviteMember" />
-          </div>
-          <UAlert v-if="inviteError" color="error" variant="soft" :description="inviteError" />
+          <!-- Add member (owner only) -->
+          <template v-if="isOwner">
+            <div class="flex gap-2">
+              <UInput
+                v-model="inviteEmail"
+                placeholder="colleague@example.com"
+                class="flex-1"
+                @keyup.enter="inviteMember"
+              />
+              <UButton label="Add" :loading="inviteLoading" :disabled="!inviteEmail.trim()" @click="inviteMember" />
+            </div>
+            <UAlert v-if="inviteError" color="error" variant="soft" :description="inviteError" />
+          </template>
 
           <!-- Members list -->
           <div class="members-list">
             <!-- Owner -->
             <div class="member-row">
               <div class="member-avatar member-avatar-owner">
-                <span>{{ currentUser?.email?.[0]?.toUpperCase() }}</span>
+                <span>{{ ownerEmail?.[0]?.toUpperCase() }}</span>
               </div>
-              <span class="text-sm text-(--ui-text) flex-1">{{ currentUser?.email }}</span>
+              <span class="text-sm text-(--ui-text) flex-1">{{ ownerEmail }}</span>
               <span class="member-badge">Owner</span>
             </div>
 
@@ -314,6 +324,7 @@ async function removeMember(userId: string) {
               </div>
               <span class="text-sm text-(--ui-text) flex-1">{{ member.email }}</span>
               <UButton
+                v-if="isOwner"
                 icon="i-lucide-x"
                 size="xs"
                 color="error"

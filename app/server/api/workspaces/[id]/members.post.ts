@@ -2,19 +2,16 @@ import { v4 as uuidv4 } from 'uuid'
 import { db } from '~/server/utils/db'
 import { sendWorkspaceInviteEmail } from '~/server/utils/email'
 import { isValidEmail } from '~/server/utils/validate'
+import { requireWorkspaceOwner } from '~/server/utils/workspace-access'
 
-interface WorkspaceRow { id: string; owner_id: string; name: string }
 interface UserRow { id: string; email: string }
 
 export default defineEventHandler(async (event) => {
   const user = event.context.user
   if (!user) throw createError({ statusCode: 401, message: 'Unauthorized' })
 
-  const workspaceId = getRouterParam(event, 'id')
-  const workspace = db.prepare('SELECT id, owner_id, name FROM workspaces WHERE id = ?').get(workspaceId) as WorkspaceRow | undefined
-
-  if (!workspace) throw createError({ statusCode: 404, message: 'Workspace not found' })
-  if (workspace.owner_id !== user.id) throw createError({ statusCode: 403, message: 'Forbidden' })
+  const workspaceId = getRouterParam(event, 'id')!
+  const workspace = requireWorkspaceOwner(workspaceId, user.id)
 
   const body = await readBody(event)
   const email = body?.email?.toLowerCase?.()?.trim()

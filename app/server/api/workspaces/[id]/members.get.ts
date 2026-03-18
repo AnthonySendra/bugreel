@@ -1,16 +1,14 @@
 import { db } from '~/server/utils/db'
-
-interface WorkspaceRow { id: string; owner_id: string }
+import { requireWorkspaceAccess } from '~/server/utils/workspace-access'
 
 export default defineEventHandler((event) => {
   const user = event.context.user
   if (!user) throw createError({ statusCode: 401, message: 'Unauthorized' })
 
-  const workspaceId = getRouterParam(event, 'id')
-  const workspace = db.prepare('SELECT id, owner_id FROM workspaces WHERE id = ?').get(workspaceId) as WorkspaceRow | undefined
+  const workspaceId = getRouterParam(event, 'id')!
+  const { workspace } = requireWorkspaceAccess(workspaceId, user.id)
 
-  if (!workspace) throw createError({ statusCode: 404, message: 'Workspace not found' })
-  if (workspace.owner_id !== user.id) throw createError({ statusCode: 403, message: 'Forbidden' })
+  const owner = db.prepare('SELECT id, email FROM users WHERE id = ?').get(workspace.owner_id) as { id: string; email: string }
 
   const members = db.prepare(`
     SELECT u.id, u.email, wm.created_at
@@ -20,5 +18,5 @@ export default defineEventHandler((event) => {
     ORDER BY wm.created_at ASC
   `).all(workspaceId)
 
-  return members
+  return { owner, members }
 })

@@ -3,12 +3,12 @@ import { writeFileSync } from 'fs'
 import { join } from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { db, reelsDir } from '~/server/utils/db'
+import { requireWorkspaceAccess } from '~/server/utils/workspace-access'
 
-interface WorkspaceRow { id: string; owner_id: string }
 interface ApiTokenRow { id: string; app_id: string }
 
 export default defineEventHandler(async (event) => {
-  const workspaceId = getRouterParam(event, 'id')
+  const workspaceId = getRouterParam(event, 'id')!
 
   // Auth: accept either a JWT user (dashboard) or an app API token (extension)
   const user = event.context.user
@@ -37,13 +37,8 @@ export default defineEventHandler(async (event) => {
     }
     // API token is valid — skip ownership check below
   } else {
-    // JWT user: verify workspace ownership
-    const workspace = db
-      .prepare('SELECT id, owner_id FROM workspaces WHERE id = ?')
-      .get(workspaceId) as WorkspaceRow | undefined
-
-    if (!workspace) throw createError({ statusCode: 404, message: 'Workspace not found' })
-    if (workspace.owner_id !== user.id) throw createError({ statusCode: 403, message: 'Forbidden' })
+    // JWT user: verify workspace access (owner or member)
+    requireWorkspaceAccess(workspaceId, user.id)
   }
 
   const parts = await readMultipartFormData(event)

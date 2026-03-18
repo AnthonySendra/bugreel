@@ -36,7 +36,7 @@ export default defineEventHandler((event) => {
   if (!isEmailEnabled()) return
   if (!event.context.user) return
   // Allow auth routes (login, register, verify, resend, me) and ingest routes
-  if (path.startsWith('/api/auth/') || path.startsWith('/api/ingest/')) return
+  if (path.startsWith('/api/auth/') || path.startsWith('/api/ingest/') || path.startsWith('/api/recorder-lib/')) return
 
   // Only guard /api/* routes
   if (!path.startsWith('/api/')) return
