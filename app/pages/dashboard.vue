@@ -64,7 +64,7 @@ const hasWorkspaces = computed(() => (workspaces.value?.length || 0) > 0)
 
 <template>
   <div class="min-h-screen bg-(--ui-bg) dash-page flex flex-col">
-    <div class="max-w-4xl mx-auto px-6 py-10 space-y-10">
+    <div class="flex-1 px-10 py-8 w-full max-w-5xl mx-auto space-y-10">
 
       <!-- Header -->
       <div class="flex items-center justify-between">

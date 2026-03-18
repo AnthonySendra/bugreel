@@ -84,7 +84,7 @@ function closeNewAppModal() {
     <header class="h-14 border-b border-(--ui-border) px-5 flex items-center gap-1 shrink-0">
 
       <!-- Logo / Home link -->
-      <NuxtLink to="/" class="flex items-center shrink-0 mr-3 group" title="Home">
+      <NuxtLink to="/dashboard" class="flex items-center shrink-0 mr-3 group" title="Home">
         <div class="w-3.5 h-3.5 rounded-full bg-bugreel-500 group-hover:bg-bugreel-400 transition-colors" />
       </NuxtLink>
 
