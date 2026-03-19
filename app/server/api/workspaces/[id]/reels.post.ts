@@ -48,6 +48,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'No file uploaded. Use multipart field name "file".' })
   }
 
+  const MAX_FILE_SIZE = 50 * 1024 * 1024
+  if (filePart.data.length > MAX_FILE_SIZE) {
+    throw createError({ statusCode: 413, message: 'File too large. Maximum size is 50MB.' })
+  }
+
   const id = uuidv4()
   const filename = `${id}.reel`
   const filePath = join(reelsDir, filename)

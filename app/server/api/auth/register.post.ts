@@ -37,6 +37,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Password must be at least 6 characters' })
   }
 
+  if (password.length > 128) {
+    throw createError({ statusCode: 400, message: 'Password must be 128 characters or fewer' })
+  }
+
   // Check if email is already taken
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase())
   if (existing) {

@@ -51,6 +51,14 @@ const ticketDescription = ref('')
 const ticketCreating = ref(false)
 const ticketError = ref('')
 
+// ── Reel actions (rename, delete, mark as done) ──────────────────────────────
+const reelMeta = ref<any>(null)
+const reelStatus = ref('open')
+const isScreenshot = ref(false)
+
+const canvasWidth = ref(1280)
+const canvasHeight = ref(720)
+
 // ── Element pick mode (for linking comments to DOM elements) ──────────────────
 const pickModeActive = ref(false)
 const pinnedElement = ref<{
@@ -145,6 +153,9 @@ async function loadReel() {
 function initViewer() {
   const { consoleEvents = [], networkEvents = [], interactionEvents = [], meta = {} } = recording
 
+  // Detect screenshot from recording metadata (fallback for reels without DB flag)
+  if (meta.isScreenshot) isScreenshot.value = true
+
   if (metaDateEl.value) metaDateEl.value.textContent = meta.recordedAt ? new Date(meta.recordedAt).toLocaleString() : ''
   if (consoleCountEl.value) consoleCountEl.value.textContent = fmtCount(consoleEvents.length)
   if (networkCountEl.value) networkCountEl.value.textContent = fmtCount(networkEvents.length)
@@ -159,6 +170,8 @@ function initViewer() {
   const metaEvent = rrwebEvents.find((e: any) => e.type === 4)
   pageWidth = metaEvent?.data?.width || 1280
   pageHeight = metaEvent?.data?.height || 720
+  canvasWidth.value = pageWidth
+  canvasHeight.value = pageHeight
 
 
   const firstTs = rawEvents[0]?.timestamp ?? 0
@@ -1511,11 +1524,64 @@ async function createTicket() {
   }
 }
 
+// ── Reel meta & actions ──────────────────────────────────────────────────────
+async function loadReelMeta() {
+  try {
+    const headers: Record<string, string> = token.value
+      ? { Authorization: `Bearer ${token.value}` }
+      : {}
+    const data = await $fetch<any>(`/api/reels/${reelId}`, { headers })
+    reelMeta.value = data
+    if (data.status) reelStatus.value = data.status
+    if (data.is_screenshot) isScreenshot.value = true
+  } catch (err) {
+    console.error('[bugreel] Failed to load reel meta', err)
+  }
+}
+
+function navigateBack() {
+  const router = useRouter()
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/')
+  }
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+function seekRelative(deltaMs: number) {
+  const newOffset = Math.max(0, Math.min(clock.current + deltaMs, totalDuration))
+  const wasPlaying = clock.seek(newOffset)
+  if (replayer) {
+    replayer.pause(newOffset)
+    if (wasPlaying) replayer.play(newOffset)
+  }
+  updateUI(newOffset)
+}
+
+function onKeydown(e: KeyboardEvent) {
+  const tag = (e.target as HTMLElement)?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+  if (e.code === 'Space') {
+    e.preventDefault()
+    togglePlay()
+  } else if (e.code === 'ArrowLeft') {
+    e.preventDefault()
+    seekRelative(-5000)
+  } else if (e.code === 'ArrowRight') {
+    e.preventDefault()
+    seekRelative(5000)
+  }
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(() => {
   loadReel()
   loadComments()
   loadTicketInfo()
+  loadReelMeta()
+  window.addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
@@ -1525,6 +1591,7 @@ onUnmounted(() => {
   if (inspectActive.value) deactivateInspect()
   if (pickModeActive.value) deactivatePickMode()
   hideElementHighlight()
+  window.removeEventListener('keydown', onKeydown)
 })
 </script>
 
@@ -1616,6 +1683,20 @@ onUnmounted(() => {
             </svg>
             <span>Create ticket</span>
           </button>
+
+          <!-- More actions dropdown -->
+          <ReelActionMenu
+            :reel-id="reelId"
+            :reel-name="reelMeta?.original_name"
+            :status="reelStatus"
+            :assigned-user-id="reelMeta?.assigned_user_id"
+            :tags="reelMeta?.tags"
+            :workspace-id="reelMeta?.workspace_id"
+            :headers="token ? { Authorization: `Bearer ${token}` } : {}"
+            size="sm"
+            @updated="loadReelMeta()"
+            @deleted="navigateBack()"
+          />
         </div>
       </div>
 
@@ -1891,8 +1972,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Controls -->
-      <div id="controls">
+      <!-- Controls (hidden for screenshots) -->
+      <div v-if="!isScreenshot" id="controls">
         <button ref="playBtnEl" id="play-btn" @click="togglePlay">▶</button>
         <div id="timeline">
           <div ref="progressFillEl" id="progress-fill" />
@@ -3266,4 +3347,5 @@ onUnmounted(() => {
 .cm-element-badge svg {
   flex-shrink: 0;
 }
+
 </style>

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 const { token } = useAuth()
 const isLoggedIn = computed(() => !!token.value)
+const runtimeConfig = useRuntimeConfig()
+const isStatic = computed(() => !!runtimeConfig.public.staticLanding)
 
 const copied = ref<string | null>(null)
 
@@ -22,12 +24,14 @@ function copyToClipboard(text: string, id: string) {
         </NuxtLink>
         <div class="flex items-center gap-3">
           <UButton href="https://github.com/AnthonySendra/bugreel" target="_blank" variant="ghost" color="neutral" size="sm" icon="i-lucide-github" label="GitHub" />
-          <template v-if="isLoggedIn">
-            <UButton to="/dashboard" size="sm" label="Dashboard" />
-          </template>
-          <template v-else>
-            <UButton to="/login" variant="ghost" color="neutral" size="sm" label="Sign in" />
-            <UButton to="/register" size="sm" label="Get started" />
+          <template v-if="!isStatic">
+            <template v-if="isLoggedIn">
+              <UButton to="/dashboard" size="sm" label="Dashboard" />
+            </template>
+            <template v-else>
+              <UButton to="/login" variant="ghost" color="neutral" size="sm" label="Sign in" />
+              <UButton to="/register" size="sm" label="Get started" />
+            </template>
           </template>
         </div>
       </div>
@@ -47,8 +51,10 @@ function copyToClipboard(text: string, id: string) {
           Capture DOM, console, network &amp; interactions as a structured, replayable recording &mdash; not a video. Self-hosted, no vendor lock-in.
         </p>
         <div class="flex items-center justify-center gap-4 pt-2">
-          <UButton v-if="isLoggedIn" to="/dashboard" size="lg" label="Dashboard" />
-          <UButton v-else to="/register" size="lg" label="Create an account" />
+          <template v-if="!isStatic">
+            <UButton v-if="isLoggedIn" to="/dashboard" size="lg" label="Dashboard" />
+            <UButton v-else to="/register" size="lg" label="Create an account" />
+          </template>
           <UButton href="#setup" size="lg" variant="outline" color="neutral" label="Setup guide" />
           <UButton href="https://github.com/AnthonySendra/bugreel" target="_blank" size="lg" variant="outline" color="neutral" icon="i-lucide-github" label="GitHub" />
         </div>
@@ -65,28 +71,28 @@ function copyToClipboard(text: string, id: string) {
               <UIcon name="i-lucide-monitor" class="text-bugreel-400 text-lg" />
             </div>
             <h3 class="text-white font-medium text-sm">DOM Replay</h3>
-            <p class="text-xs text-neutral-500 leading-relaxed">Pixel-perfect interactive replay using rrweb. Not a video &mdash; you can inspect elements, scroll, and resize.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">Pixel-perfect interactive replay using rrweb. Not a video &mdash; you can inspect elements, scroll, and resize.</p>
           </div>
           <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-3">
             <div class="w-9 h-9 rounded-lg bg-bugreel-950/80 border border-bugreel-800/30 flex items-center justify-center">
               <UIcon name="i-lucide-terminal" class="text-bugreel-400 text-lg" />
             </div>
             <h3 class="text-white font-medium text-sm">Console Logs</h3>
-            <p class="text-xs text-neutral-500 leading-relaxed">Every log, warning, error and uncaught exception with precise timestamps synced to the replay timeline.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">Every log, warning, error and uncaught exception with precise timestamps synced to the replay timeline.</p>
           </div>
           <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-3">
             <div class="w-9 h-9 rounded-lg bg-bugreel-950/80 border border-bugreel-800/30 flex items-center justify-center">
               <UIcon name="i-lucide-globe" class="text-bugreel-400 text-lg" />
             </div>
             <h3 class="text-white font-medium text-sm">Network Requests</h3>
-            <p class="text-xs text-neutral-500 leading-relaxed">URL, method, status, headers, duration and response bodies. See exactly what the API returned when the bug happened.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">URL, method, status, headers, duration and response bodies. See exactly what the API returned when the bug happened.</p>
           </div>
           <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-3">
             <div class="w-9 h-9 rounded-lg bg-bugreel-950/80 border border-bugreel-800/30 flex items-center justify-center">
               <UIcon name="i-lucide-mouse-pointer-click" class="text-bugreel-400 text-lg" />
             </div>
             <h3 class="text-white font-medium text-sm">User Interactions</h3>
-            <p class="text-xs text-neutral-500 leading-relaxed">Clicks, inputs, and navigations logged in order. Jump to any interaction on the timeline to see what the user did.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">Clicks, inputs, and navigations logged in order. Jump to any interaction on the timeline to see what the user did.</p>
           </div>
         </div>
       </div>
@@ -102,42 +108,63 @@ function copyToClipboard(text: string, id: string) {
               <UIcon name="i-lucide-message-square" class="text-neutral-500" />
               Timestamped Comments
             </h3>
-            <p class="text-xs text-neutral-500 leading-relaxed">Add comments at any point in the timeline. Threaded replies with email notifications to keep the team in sync.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">Add comments at any point in the timeline. Threaded replies with email notifications to keep the team in sync.</p>
           </div>
           <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-2">
             <h3 class="text-white font-medium text-sm flex items-center gap-2">
               <UIcon name="i-lucide-flask-conical" class="text-neutral-500" />
               Playwright Export
             </h3>
-            <p class="text-xs text-neutral-500 leading-relaxed">Generate a ready-to-run <code class="text-bugreel-400">.spec.ts</code> file from any recording. Reproduce bugs in CI automatically.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">Generate a ready-to-run <code class="text-bugreel-400">.spec.ts</code> file from any recording. Reproduce bugs in CI automatically.</p>
           </div>
           <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-2">
             <h3 class="text-white font-medium text-sm flex items-center gap-2">
               <UIcon name="i-lucide-search" class="text-neutral-500" />
               DOM Inspector
             </h3>
-            <p class="text-xs text-neutral-500 leading-relaxed">Hover over any element in the replay to inspect attributes and computed styles, like DevTools frozen in time.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">Hover over any element in the replay to inspect attributes and computed styles, like DevTools frozen in time.</p>
           </div>
           <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-2">
             <h3 class="text-white font-medium text-sm flex items-center gap-2">
               <UIcon name="i-lucide-puzzle" class="text-neutral-500" />
               Browser Extension
             </h3>
-            <p class="text-xs text-neutral-500 leading-relaxed">Chrome and Firefox extensions for full-featured recording including multi-page navigations.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">Chrome and Firefox extensions for full-featured recording including multi-page navigations.</p>
           </div>
           <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-2">
             <h3 class="text-white font-medium text-sm flex items-center gap-2">
               <UIcon name="i-lucide-code" class="text-neutral-500" />
               Embed SDK
             </h3>
-            <p class="text-xs text-neutral-500 leading-relaxed">One script tag to add a "Record Bug" button to any site. No installation required for your users.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">One script tag to add a "Record Bug" button to any site. No installation required for your users.</p>
           </div>
           <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-2">
             <h3 class="text-white font-medium text-sm flex items-center gap-2">
               <UIcon name="i-lucide-database" class="text-neutral-500" />
               Your Infrastructure
             </h3>
-            <p class="text-xs text-neutral-500 leading-relaxed">SQLite + local disk or any S3-compatible storage. No external dependencies, runs anywhere with Docker.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">SQLite + local disk or any S3-compatible storage. No external dependencies, runs anywhere with Docker.</p>
+          </div>
+          <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-2">
+            <h3 class="text-white font-medium text-sm flex items-center gap-2">
+              <UIcon name="i-lucide-plug" class="text-neutral-500" />
+              Linear &amp; Jira Integration
+            </h3>
+            <p class="text-sm text-neutral-400 leading-relaxed">Create tickets directly from recordings. Bidirectional sync &mdash; mark a reel as done to close the ticket, or close the ticket to mark the reel as done.</p>
+          </div>
+          <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-2">
+            <h3 class="text-white font-medium text-sm flex items-center gap-2">
+              <UIcon name="i-lucide-circle-dot" class="text-neutral-500" />
+              Permanent Recording
+            </h3>
+            <p class="text-sm text-neutral-400 leading-relaxed">SDK records continuously in a rolling buffer. When a bug happens, the last N seconds are already captured &mdash; no need to reproduce.</p>
+          </div>
+          <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-2">
+            <h3 class="text-white font-medium text-sm flex items-center gap-2">
+              <UIcon name="i-lucide-bell" class="text-neutral-500" />
+              Slack, Discord &amp; Mattermost
+            </h3>
+            <p class="text-sm text-neutral-400 leading-relaxed">Webhook notifications for new recordings, comments, and done reels. Works with Slack, Discord, Mattermost, or any HTTP endpoint.</p>
           </div>
         </div>
       </div>
@@ -154,7 +181,7 @@ function copyToClipboard(text: string, id: string) {
           <div class="absolute -left-3.5 top-0 w-7 h-7 rounded-full bg-neutral-900 border border-neutral-700 flex items-center justify-center text-xs font-bold text-white">1</div>
           <h3 class="text-white font-semibold mb-2">Create an account</h3>
           <p class="text-sm text-neutral-400 mb-4">Register to create your first workspace and application.</p>
-          <UButton to="/register" size="sm" variant="soft" label="Create account →" />
+          <UButton v-if="!isStatic" to="/register" size="sm" variant="soft" label="Create account →" />
         </div>
 
         <!-- Step 2 -->
@@ -238,12 +265,14 @@ function copyToClipboard(text: string, id: string) {
         <span class="text-xs text-neutral-600">bugreel &mdash; self-hosted bug recording</span>
         <div class="flex items-center gap-4">
           <UButton href="https://github.com/AnthonySendra/bugreel" target="_blank" variant="link" color="neutral" size="xs" icon="i-lucide-github" label="GitHub" />
-          <template v-if="isLoggedIn">
-            <UButton to="/dashboard" variant="link" color="neutral" size="xs" label="Dashboard" />
-          </template>
-          <template v-else>
-            <UButton to="/login" variant="link" color="neutral" size="xs" label="Sign in" />
-            <UButton to="/register" variant="link" color="neutral" size="xs" label="Register" />
+          <template v-if="!isStatic">
+            <template v-if="isLoggedIn">
+              <UButton to="/dashboard" variant="link" color="neutral" size="xs" label="Dashboard" />
+            </template>
+            <template v-else>
+              <UButton to="/login" variant="link" color="neutral" size="xs" label="Sign in" />
+              <UButton to="/register" variant="link" color="neutral" size="xs" label="Register" />
+            </template>
           </template>
         </div>
       </div>

@@ -2,6 +2,7 @@ import { db } from '~/server/utils/db'
 import { randomUUID } from 'crypto'
 import { sendCommentReplyEmail, sendNewCommentOnReelEmail } from '~/server/utils/email'
 import { requireReelAccess } from '~/server/utils/workspace-access'
+import { sendWebhook } from '~/server/utils/webhook'
 
 interface UserRow { id: string; email: string }
 
@@ -15,6 +16,11 @@ export default defineEventHandler(async (event) => {
   if (!body.content?.trim()) throw createError({ statusCode: 400, message: 'content is required' })
   if (body.content.length > 5000) throw createError({ statusCode: 400, message: 'Comment content must be 5000 characters or fewer' })
   if (body.timestamp_ms == null) throw createError({ statusCode: 400, message: 'timestamp_ms is required' })
+
+  if (body.element_info !== undefined && body.element_info !== null) {
+    if (typeof body.element_info !== 'string') throw createError({ statusCode: 400, message: 'element_info must be a string' })
+    if (body.element_info.length > 5000) throw createError({ statusCode: 400, message: 'element_info must be 5000 characters or fewer' })
+  }
 
   const { reel } = requireReelAccess(reelId, user.id)
 
@@ -32,6 +38,14 @@ export default defineEventHandler(async (event) => {
     JOIN users u ON c.user_id = u.id
     WHERE c.id = ?
   `).get(id) as any
+
+  // ── Webhook (fire-and-forget) ────────────────────────────────────────────
+  if (reel.app_id) {
+    sendWebhook(reel.app_id, 'new_comment', {
+      reel: { id: reelId },
+      comment: { content: body.content.trim(), user: user.email },
+    }).catch(() => {})
+  }
 
   // ── Notifications (fire-and-forget) ──────────────────────────────────────
 

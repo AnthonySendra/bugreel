@@ -8,6 +8,11 @@ export default defineEventHandler((event) => {
   const reelId = getRouterParam(event, 'id')!
   const { reel } = requireReelAccess(reelId, user.id)
 
+  let tags: string[] | null = null
+  if (reel.tags) {
+    try { tags = JSON.parse(reel.tags) } catch { /* ignore */ }
+  }
+
   return {
     id: reel.id,
     workspace_id: reel.workspace_id,
@@ -16,5 +21,9 @@ export default defineEventHandler((event) => {
     original_name: reel.original_name,
     size: reel.size,
     created_at: reel.created_at,
+    status: reel.status,
+    is_screenshot: reel.is_screenshot,
+    assigned_user_id: reel.assigned_user_id,
+    tags,
   }
 })

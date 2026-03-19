@@ -9,6 +9,7 @@ import { join } from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { db, reelsDir } from '~/server/utils/db'
 import { validateIngestAuth } from '~/server/utils/ingest-auth'
+import { sendWebhook } from '~/server/utils/webhook'
 
 export default defineEventHandler(async (event) => {
   const { apiToken, app } = validateIngestAuth(event)
@@ -44,7 +45,10 @@ export default defineEventHandler(async (event) => {
 
   const created_at = Date.now()
 
-  db.prepare('INSERT INTO reels (id, workspace_id, filename, original_name, size, created_at, app_id, uploaded_by_user_id, reporter_email, reporter_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+  const isScreenshotPart = parts?.find(p => p.name === 'is_screenshot')
+  const isScreenshot = isScreenshotPart?.data?.toString('utf-8').trim() === '1' ? 1 : 0
+
+  db.prepare('INSERT INTO reels (id, workspace_id, filename, original_name, size, created_at, app_id, uploaded_by_user_id, reporter_email, reporter_name, is_screenshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
     id,
     app.workspace_id,
     filename,
@@ -55,7 +59,10 @@ export default defineEventHandler(async (event) => {
     apiToken.user_id,
     reporterEmail,
     reporterName,
+    isScreenshot,
   )
+
+  sendWebhook(app.id, 'new_reel', { reel: { id, name: originalName, url: `/api/reels/${id}/file` } }).catch(() => {})
 
   return { id, filename, original_name: originalName, size, created_at }
 })

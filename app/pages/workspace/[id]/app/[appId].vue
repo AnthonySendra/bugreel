@@ -99,6 +99,7 @@ function closeDeleteAppModal() {
     <AppReelsTab
       v-if="activeTab === 'reels'"
       :appId="appId"
+      :workspaceId="(route.params.id as string)"
       :headers="headers"
       :token="token"
       :sdkScriptUrl="sdkScriptUrl"

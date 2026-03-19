@@ -1,5 +1,5 @@
 import { db } from '~/server/utils/db'
-import { requireWorkspaceAccess } from '~/server/utils/workspace-access'
+import { requireWorkspaceOwner } from '~/server/utils/workspace-access'
 
 export default defineEventHandler((event) => {
   const user = event.context.user
@@ -8,7 +8,7 @@ export default defineEventHandler((event) => {
   const workspaceId = getRouterParam(event, 'id')!
   const targetUserId = getRouterParam(event, 'userId')
 
-  requireWorkspaceAccess(workspaceId, user.id)
+  requireWorkspaceOwner(workspaceId, user.id)
 
   db.prepare('DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?').run(workspaceId, targetUserId)
 

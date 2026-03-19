@@ -1,5 +1,6 @@
 import { db } from '~/server/utils/db'
 import { requireWorkspaceAccess } from '~/server/utils/workspace-access'
+import { validatePublicUrl } from '~/server/utils/url-validator'
 
 interface AppRow {
   id: string
@@ -65,6 +66,12 @@ export default defineEventHandler(async (event) => {
   if (provider === 'jira') {
     if (!config.siteUrl || !config.email || !config.apiToken) {
       throw createError({ statusCode: 400, message: 'siteUrl, email, and apiToken are required' })
+    }
+
+    try {
+      await validatePublicUrl(config.siteUrl)
+    } catch (e: any) {
+      throw createError({ statusCode: 400, message: e.message || 'Invalid Jira site URL' })
     }
 
     const siteUrl = config.siteUrl.replace(/\/+$/, '')

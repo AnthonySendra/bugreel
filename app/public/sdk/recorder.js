@@ -810,6 +810,7 @@
         '<button class="br-menu-item" id="__br_m_identity">✏️ Edit name & email</button>',
         '<div class="br-menu-sep"></div>',
         '<button class="br-menu-item" id="__br_m_permanent">🔴 Permanent recording</button>',
+        '<button class="br-menu-item" id="__br_m_screenshot">📸 Screenshot</button>',
       '</div>',
     ].join('');
     doc.body.appendChild(wrap);
@@ -829,6 +830,10 @@
     doc.getElementById('__br_m_permanent').addEventListener('click', function () {
       closeMenu();
       showPermanentModal();
+    });
+    doc.getElementById('__br_m_screenshot').addEventListener('click', function () {
+      closeMenu();
+      SDK.screenshot();
     });
     // Close menu on outside click
     doc.addEventListener('click', function (e) {
@@ -1212,9 +1217,94 @@
     });
   }
 
+  // ── Screenshot capture ───────────────────────────────────────────────────
+
+  function takeScreenshot() {
+    return new Promise(function (resolve) {
+      var events = [];
+      var stopFn = global.rrweb.record({
+        emit: function (event) { events.push(event); },
+        checkoutEveryNth: 1,
+      });
+      // Wait a tick for the full snapshot to be captured
+      setTimeout(function () {
+        stopFn();
+        resolve(events);
+      }, 200);
+    });
+  }
+
+  function getRecentConsoleLogs() {
+    // Return the last 50 console events captured by the intercept
+    return state.consoleEvents.slice(-50);
+  }
+
+  function getRecentNetworkRequests() {
+    // Return the last 20 network events captured by the intercept
+    return state.networkEvents.slice(-20);
+  }
+
+  function showScreenshotNameModal() {
+    return new Promise(function (resolve) {
+      var defaultName = (doc.title || location.hostname) + ' ' +
+        new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '-');
+
+      var overlay = doc.createElement('div');
+      overlay.id = '__bugreel_screenshot_overlay__';
+      var styles = [
+        'position:fixed;inset:0;z-index:2147483647;',
+        'display:flex;align-items:center;justify-content:center;',
+        'background:rgba(0,0,0,.55);backdrop-filter:blur(4px);',
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
+      ].join('');
+
+      overlay.innerHTML = [
+        '<div style="' + styles + '">',
+        '<div style="background:#1a1a1f;border:1px solid #333;border-radius:12px;padding:24px;width:380px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.5)">',
+          '<div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:4px">Screenshot captured</div>',
+          '<div style="font-size:12px;color:#888;margin-bottom:16px">Give it a name or save with the default</div>',
+          '<input id="__br_ss_name" type="text" placeholder="Screenshot name" value="' + defaultName.replace(/"/g, '&quot;') + '" style="',
+            'width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;',
+            'border:1px solid #333;background:#111;color:#fff;font-size:14px;',
+            'outline:none;margin-bottom:16px;',
+          '"/>',
+          '<div style="display:flex;gap:8px;justify-content:flex-end">',
+            '<button id="__br_ss_skip" style="padding:8px 16px;border-radius:6px;border:1px solid #333;background:transparent;color:#888;cursor:pointer;font-size:13px;font-family:inherit">Skip</button>',
+            '<button id="__br_ss_save" style="padding:8px 16px;border-radius:6px;border:none;background:#ff4070;color:#fff;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">Save</button>',
+          '</div>',
+        '</div>',
+        '</div>',
+      ].join('');
+
+      doc.body.appendChild(overlay);
+      var nameInput = doc.getElementById('__br_ss_name');
+      nameInput.focus();
+      nameInput.select();
+
+      function finish(name) {
+        overlay.remove();
+        resolve(name);
+      }
+
+      doc.getElementById('__br_ss_skip').addEventListener('click', function () {
+        finish(defaultName);
+      });
+      doc.getElementById('__br_ss_save').addEventListener('click', function () {
+        var val = nameInput.value.trim();
+        finish(val || defaultName);
+      });
+      nameInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          var val = nameInput.value.trim();
+          finish(val || defaultName);
+        }
+      });
+    });
+  }
+
   // ── Upload ─────────────────────────────────────────────────────────────────
 
-  async function compressAndUpload(recording) {
+  async function compressAndUpload(recording, customName) {
     var json = JSON.stringify(recording);
     var encoded = new TextEncoder().encode(json);
     var body;
@@ -1241,12 +1331,15 @@
       body = encoded; // no compression fallback
     }
 
-    var filename = 'bug-' + new Date(recording.meta.recordedAt)
-      .toISOString().slice(0, 19).replace(/:/g, '-') + '.reel';
+    var filename = customName
+      ? customName.replace(/[^a-zA-Z0-9_\-. ]/g, '_').slice(0, 100) + '.reel'
+      : 'bug-' + new Date(recording.meta.recordedAt)
+        .toISOString().slice(0, 19).replace(/:/g, '-') + '.reel';
     var base = cfg.host.replace(/\/$/, '') + '/api/ingest';
     var qs = '?token=' + encodeURIComponent(cfg.token);
+    var doFetch = _origFetch || fetch.bind(global);
 
-    var storageRes = await _origFetch(base + '/storage' + qs);
+    var storageRes = await doFetch(base + '/storage' + qs);
     if (!storageRes.ok) throw new Error('Storage check failed: ' + storageRes.status);
     var storageData = await storageRes.json();
 
@@ -1255,7 +1348,8 @@
       var urlPayload = { originalName: filename };
       if (_reporter.email) urlPayload.reporter_email = _reporter.email;
       if (_reporter.name) urlPayload.reporter_name = _reporter.name;
-      var urlRes = await _origFetch(base + '/upload-url' + qs, {
+      if (recording.meta && recording.meta.isScreenshot) urlPayload.is_screenshot = true;
+      var urlRes = await doFetch(base + '/upload-url' + qs, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(urlPayload),
@@ -1263,7 +1357,7 @@
       if (!urlRes.ok) throw new Error('Upload URL failed: ' + urlRes.status);
       var urlData = await urlRes.json();
       reelId = urlData.id;
-      var putRes = await _origFetch(urlData.uploadUrl, {
+      var putRes = await doFetch(urlData.uploadUrl, {
         method: 'PUT',
         body: body,
         headers: { 'Content-Type': 'application/octet-stream' },
@@ -1274,7 +1368,8 @@
       form.append('file', new Blob([body], { type: 'application/octet-stream' }), filename);
       if (_reporter.email) form.append('reporter_email', _reporter.email);
       if (_reporter.name) form.append('reporter_name', _reporter.name);
-      var uploadRes = await _origFetch(base + '/reels' + qs, {
+      if (recording.meta && recording.meta.isScreenshot) form.append('is_screenshot', '1');
+      var uploadRes = await doFetch(base + '/reels' + qs, {
         method: 'POST',
         body: form,
       });
@@ -1285,13 +1380,15 @@
     return reelId;
   }
 
-  function downloadLocally(recording) {
+  function downloadLocally(recording, customName) {
     var blob = new Blob([JSON.stringify(recording)], { type: 'application/json' });
     var url = URL.createObjectURL(blob);
     var a = doc.createElement('a');
     a.href = url;
-    a.download = 'bug-' + new Date(recording.meta.recordedAt)
-      .toISOString().slice(0, 19).replace(/:/g, '-') + '.reel';
+    a.download = customName
+      ? customName.replace(/[^a-zA-Z0-9_\-. ]/g, '_').slice(0, 100) + '.reel'
+      : 'bug-' + new Date(recording.meta.recordedAt)
+        .toISOString().slice(0, 19).replace(/:/g, '-') + '.reel';
     doc.body.appendChild(a);
     a.click();
     doc.body.removeChild(a);
@@ -1447,6 +1544,85 @@
         }
       }
       return this;
+    },
+
+    /** Take a screenshot — captures a single rrweb snapshot + current state and uploads it. */
+    screenshot: async function () {
+      if (state.isRecording) return; // don't screenshot while recording
+
+      if (!global.rrweb) {
+        console.warn('[bugreel] rrweb not loaded');
+        return;
+      }
+
+      if (cfg.widget !== false) setWidget('saving', '📸 Capturing…');
+
+      try {
+        // Capture rrweb snapshot
+        var screenshotEvents = await takeScreenshot();
+
+        // Capture recent console and network data
+        var recentConsoleLogs = getRecentConsoleLogs();
+        var recentNetworkRequests = getRecentNetworkRequests();
+
+        // Capture fonts
+        var fontList = collectFontsAsBase64();
+        var capturedFonts = fontList.length ? await fetchFontsAsBase64(fontList) : [];
+
+        // Ask for a name
+        var screenshotName = await showScreenshotNameModal();
+
+        if (cfg.widget !== false) setWidget('saving', '⏳ Uploading…');
+
+        var recording = {
+          version: '1.0',
+          meta: {
+            url: global.location.href,
+            title: doc.title,
+            recordedAt: new Date().toISOString(),
+            duration: 0,
+            userAgent: navigator.userAgent,
+            screenWidth: global.innerWidth,
+            screenHeight: global.innerHeight,
+            isScreenshot: true,
+            source: 'sdk-screenshot',
+            original_name: screenshotName,
+          },
+          rrwebEvents: screenshotEvents,
+          consoleEvents: recentConsoleLogs,
+          networkEvents: recentNetworkRequests,
+          interactionEvents: [],
+          fonts: capturedFonts,
+        };
+
+        if (cfg.host && cfg.token) {
+          // Ask who is reporting if not already identified
+          if (!_reporter.email) await promptReporter();
+
+          var reelId = await compressAndUpload(recording, screenshotName);
+          var reelUrl = cfg.host + '/reel/' + reelId;
+
+          if (state.ticketProvider) {
+            if (cfg.widget !== false) setWidget('', '⏺ Record Bug');
+            showTicketModal(reelId, reelUrl);
+          } else {
+            try { await navigator.clipboard.writeText(reelUrl); } catch (_) {}
+            if (cfg.widget !== false) {
+              setWidget('done', '✓ Link copied!');
+              setTimeout(function () { setWidget('', '⏺ Record Bug'); }, 4000);
+            }
+          }
+        } else {
+          downloadLocally(recording, screenshotName);
+          if (cfg.widget !== false) setWidget('', '⏺ Record Bug');
+        }
+      } catch (err) {
+        console.error('[bugreel] Screenshot failed:', err);
+        if (cfg.widget !== false) {
+          setWidget('', '✗ Screenshot failed');
+          setTimeout(function () { setWidget('', '⏺ Record Bug'); }, 3000);
+        }
+      }
     },
 
     /** Stop recording, compress, and upload (or download locally if no API config). */

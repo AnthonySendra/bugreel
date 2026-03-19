@@ -3,6 +3,7 @@ import type { Reel, ReelsResponse } from '~/types/app'
 
 const props = defineProps<{
   appId: string
+  workspaceId: string
   headers: Record<string, string>
   token: string | null
   sdkScriptUrl: string
@@ -18,10 +19,12 @@ const allReels = ref<Reel[]>([])
 const hasMore = ref(false)
 const nextBefore = ref<number | null>(null)
 const loadingMore = ref(false)
+const totalReelCount = ref(0)
 
 // ── Date range filter state ──────────────────────────────────────────────────
 const filterFrom = ref('')
 const filterTo = ref('')
+const filterStatus = ref<'open' | 'all'>('open')
 
 /** Convert YYYY-MM-DD string to epoch ms (start of day, local time) */
 function dateToEpoch(dateStr: string, endOfDay = false): number | undefined {
@@ -40,6 +43,7 @@ const fetchParams = computed(() => {
   const to = dateToEpoch(filterTo.value, true)
   if (from !== undefined) p.from = from
   if (to !== undefined) p.to = to
+  p.status = filterStatus.value
   return p
 })
 
@@ -52,6 +56,7 @@ if (reelsData.value) {
   allReels.value = reelsData.value.items
   hasMore.value = reelsData.value.hasMore
   nextBefore.value = reelsData.value.nextBefore
+  totalReelCount.value = reelsData.value.totalCount ?? 0
 }
 
 watch(reelsData, (val) => {
@@ -59,6 +64,7 @@ watch(reelsData, (val) => {
     allReels.value = val.items
     hasMore.value = val.hasMore
     nextBefore.value = val.nextBefore
+    totalReelCount.value = val.totalCount ?? 0
   }
 })
 
@@ -70,6 +76,7 @@ watch(fetchParams, async () => {
     allReels.value = reelsData.value.items
     hasMore.value = reelsData.value.hasMore
     nextBefore.value = reelsData.value.nextBefore
+    totalReelCount.value = reelsData.value.totalCount ?? 0
   }
 })
 
@@ -99,8 +106,17 @@ const sortedReels = computed(() =>
   [...(reels.value || [])].sort((a, b) => b.created_at - a.created_at)
 )
 
+// ── Tags helper ──────────────────────────────────────────────────────────────
+function parseTags(reel: Reel): string[] {
+  if (!reel.tags) return []
+  if (Array.isArray(reel.tags)) return reel.tags
+  try { return JSON.parse(reel.tags as any) } catch { return [] }
+}
+
 // ── Filters ──────────────────────────────────────────────────────────────────
 const filterCreator = ref('all')
+const filterAssignee = ref('all')
+const filterTag = ref('all')
 
 const creators = computed(() => {
   const emails = new Set<string>()
@@ -117,6 +133,38 @@ const creatorOptions = computed(() => [
 
 const showCreatorFilter = computed(() => creators.value.length > 0)
 
+const assignees = computed(() => {
+  const emails = new Set<string>()
+  for (const reel of sortedReels.value) {
+    if (reel.assigned_user_email) emails.add(reel.assigned_user_email)
+  }
+  return [...emails].sort()
+})
+
+const assigneeOptions = computed(() => [
+  { label: 'All assignees', value: 'all' },
+  ...assignees.value.map(e => ({ label: e, value: e })),
+])
+
+const showAssigneeFilter = computed(() => assignees.value.length > 0)
+
+const allTags = computed(() => {
+  const tags = new Set<string>()
+  for (const reel of sortedReels.value) {
+    for (const tag of parseTags(reel)) {
+      tags.add(tag)
+    }
+  }
+  return [...tags].sort()
+})
+
+const tagOptions = computed(() => [
+  { label: 'All tags', value: 'all' },
+  ...allTags.value.map(t => ({ label: t, value: t })),
+])
+
+const showTagFilter = computed(() => allTags.value.length > 0)
+
 const filteredReels = computed(() => {
   let list = sortedReels.value
 
@@ -124,15 +172,33 @@ const filteredReels = computed(() => {
     list = list.filter(r => r.uploaded_by_email === filterCreator.value)
   }
 
+  if (filterAssignee.value !== 'all') {
+    list = list.filter(r => r.assigned_user_email === filterAssignee.value)
+  }
+
+  if (filterTag.value !== 'all') {
+    list = list.filter(r => parseTags(r).includes(filterTag.value))
+  }
+
   return list
 })
 
-const hasActiveFilters = computed(() => filterFrom.value !== '' || filterTo.value !== '' || filterCreator.value !== 'all')
+const hasActiveFilters = computed(() =>
+  filterFrom.value !== '' ||
+  filterTo.value !== '' ||
+  filterCreator.value !== 'all' ||
+  filterAssignee.value !== 'all' ||
+  filterTag.value !== 'all' ||
+  filterStatus.value !== 'open'
+)
 
 function clearFilters() {
   filterFrom.value = ''
   filterTo.value = ''
   filterCreator.value = 'all'
+  filterAssignee.value = 'all'
+  filterTag.value = 'all'
+  filterStatus.value = 'open'
 }
 
 const reelGroups = computed(() => {
@@ -172,64 +238,26 @@ const reelGroups = computed(() => {
     .map(label => ({ label, reels: buckets[label] }))
 })
 
-// ── Delete reel ───────────────────────────────────────────────────────────────
-const deleteModalOpen = ref(false)
-const reelToDelete = ref<Reel | null>(null)
-const deleteLoading = ref(false)
+// ── Delete all done reels ─────────────────────────────────────────────────────
+const deleteAllDoneModalOpen = ref(false)
+const deleteAllDoneLoading = ref(false)
 
-function confirmDelete(reel: Reel, e: MouseEvent) {
-  e.preventDefault()
-  e.stopPropagation()
-  reelToDelete.value = reel
-  deleteModalOpen.value = true
-}
+const doneReelCount = computed(() => filteredReels.value.filter(r => r.status === 'done').length)
 
-async function deleteReel() {
-  if (!reelToDelete.value) return
-  deleteLoading.value = true
+async function deleteAllDoneReels() {
+  deleteAllDoneLoading.value = true
   try {
-    await $fetch(`/api/reels/${reelToDelete.value.id}`, {
+    await $fetch(`/api/apps/${props.appId}/reels-done`, {
       method: 'DELETE',
       headers: props.headers,
     })
-    deleteModalOpen.value = false
-    reelToDelete.value = null
+    deleteAllDoneModalOpen.value = false
     await refreshReels()
   } finally {
-    deleteLoading.value = false
+    deleteAllDoneLoading.value = false
   }
 }
 
-// ── Rename reel ──────────────────────────────────────────────────────────
-const renameModalOpen = ref(false)
-const reelToRename = ref<Reel | null>(null)
-const renameValue = ref('')
-const renameLoading = ref(false)
-
-function openRename(reel: Reel, e: MouseEvent) {
-  e.preventDefault()
-  e.stopPropagation()
-  reelToRename.value = reel
-  renameValue.value = reel.original_name || reel.filename || ''
-  renameModalOpen.value = true
-}
-
-async function renameReel() {
-  if (!reelToRename.value || !renameValue.value.trim()) return
-  renameLoading.value = true
-  try {
-    await $fetch(`/api/reels/${reelToRename.value.id}`, {
-      method: 'PATCH',
-      headers: props.headers,
-      body: { name: renameValue.value.trim() },
-    })
-    renameModalOpen.value = false
-    reelToRename.value = null
-    await refreshReels()
-  } finally {
-    renameLoading.value = false
-  }
-}
 
 // ── File upload ───────────────────────────────────────────────────────────────
 const isDragging = ref(false)
@@ -303,8 +331,21 @@ function onFileInput(e: Event) {
     </div>
 
     <!-- Filter bar -->
-    <div v-if="sortedReels.length > 0" class="filter-bar">
+    <div v-if="totalReelCount > 0" class="filter-bar">
       <div class="filter-left">
+        <div class="filter-status-toggle">
+          <button
+            class="filter-status-btn"
+            :class="{ 'filter-status-btn-active': filterStatus === 'open' }"
+            @click="filterStatus = 'open'"
+          >Open</button>
+          <button
+            class="filter-status-btn"
+            :class="{ 'filter-status-btn-active': filterStatus === 'all' }"
+            @click="filterStatus = 'all'"
+          >All</button>
+        </div>
+        <div class="filter-divider" />
         <div class="filter-date-range">
           <label class="filter-date-label">From</label>
           <input
@@ -324,6 +365,16 @@ function onFileInput(e: Event) {
       </div>
 
       <div class="filter-right">
+        <UButton
+          v-if="filterStatus === 'all' && doneReelCount > 0"
+          label="Delete all done"
+          icon="i-lucide-trash-2"
+          variant="soft"
+          color="error"
+          size="xs"
+          @click="deleteAllDoneModalOpen = true"
+        />
+        <div v-if="filterStatus === 'all' && doneReelCount > 0" class="filter-divider" />
         <USelectMenu
           v-if="showCreatorFilter"
           v-model="filterCreator"
@@ -333,6 +384,24 @@ function onFileInput(e: Event) {
           size="xs"
         />
         <div v-if="showCreatorFilter" class="filter-divider" />
+        <USelectMenu
+          v-if="showAssigneeFilter"
+          v-model="filterAssignee"
+          :items="assigneeOptions"
+          value-key="value"
+          class="filter-creator"
+          size="xs"
+        />
+        <div v-if="showAssigneeFilter" class="filter-divider" />
+        <USelectMenu
+          v-if="showTagFilter"
+          v-model="filterTag"
+          :items="tagOptions"
+          value-key="value"
+          class="filter-creator"
+          size="xs"
+        />
+        <div v-if="showTagFilter" class="filter-divider" />
         <span class="filter-count">{{ filteredReels.length }}<span class="filter-count-label"> reel{{ filteredReels.length !== 1 ? 's' : '' }}</span></span>
         <button
           v-if="hasActiveFilters"
@@ -346,7 +415,7 @@ function onFileInput(e: Event) {
     </div>
 
     <!-- Empty state -->
-    <div v-if="sortedReels.length === 0" class="empty-state">
+    <div v-if="totalReelCount === 0" class="empty-state">
       <div class="empty-icon-wrap">
         <UIcon name="i-lucide-film" class="w-8 h-8" />
       </div>
@@ -404,10 +473,7 @@ function onFileInput(e: Event) {
     <div v-else-if="filteredReels.length === 0" class="filtered-empty">
       <UIcon name="i-lucide-search-x" class="w-6 h-6 text-(--ui-text-dimmed)" />
       <p class="text-sm text-(--ui-text-muted) mt-2">No reels match the current filters.</p>
-      <button class="filter-clear mt-2" @click="clearFilters">
-        <UIcon name="i-lucide-x" class="w-3 h-3" />
-        Clear filters
-      </button>
+      <UButton label="Clear filters" icon="i-lucide-x" variant="link" color="neutral" class="mt-2" @click="clearFilters" />
     </div>
 
     <!-- Reels grid (grouped by time period) -->
@@ -424,8 +490,16 @@ function onFileInput(e: Event) {
               <ReelThumbnail :reelId="reel.id" :token="token" />
               <div class="reel-play-overlay">
                 <div class="reel-play-btn">
-                  <UIcon name="i-lucide-play" class="w-5 h-5 text-white ml-0.5" />
+                  <UIcon v-if="reel.is_screenshot" name="i-lucide-camera" class="w-5 h-5 text-white" />
+                  <UIcon v-else name="i-lucide-play" class="w-5 h-5 text-white ml-0.5" />
                 </div>
+              </div>
+              <div v-if="reel.status === 'done'" class="reel-done-badge">
+                <UIcon name="i-lucide-circle-check" class="w-3 h-3" />
+                Done
+              </div>
+              <div v-if="reel.share_token" class="reel-share-badge">
+                <UIcon name="i-lucide-share-2" class="w-3 h-3" />
               </div>
             </NuxtLink>
 
@@ -434,27 +508,32 @@ function onFileInput(e: Event) {
                 <p class="text-sm font-medium text-(--ui-text-highlighted) group-hover:text-white transition-colors truncate">
                   {{ reel.original_name || reel.filename }}
                 </p>
+                <div v-if="parseTags(reel).length" class="reel-tags">
+                  <span v-for="tag in parseTags(reel)" :key="tag" class="reel-tag">{{ tag }}</span>
+                </div>
                 <p class="text-xs text-(--ui-text-dimmed) mt-0.5">
                   {{ formatSize(reel.size) }} · {{ timeAgo(reel.created_at) }}
                   <template v-if="reel.reporter_name || reel.uploaded_by_email"> · {{ reel.reporter_name || reel.uploaded_by_email }}</template>
                 </p>
               </NuxtLink>
-              <div class="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                <UButton
-                  icon="i-lucide-pencil"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  title="Rename"
-                  @click="openRename(reel, $event)"
-                />
-                <UButton
-                  icon="i-lucide-trash-2"
-                  size="xs"
-                  color="error"
-                  variant="ghost"
-                  title="Delete"
-                  @click="confirmDelete(reel, $event)"
+              <div
+                v-if="reel.assigned_user_email"
+                class="reel-assignee"
+                :title="reel.assigned_user_email"
+              >
+                {{ reel.assigned_user_email[0].toUpperCase() }}
+              </div>
+              <div class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                <ReelActionMenu
+                  :reel-id="reel.id"
+                  :reel-name="reel.original_name || reel.filename"
+                  :status="reel.status"
+                  :assigned-user-id="reel.assigned_user_id"
+                  :tags="parseTags(reel)"
+                  :workspace-id="props.workspaceId"
+                  :headers="props.headers"
+                  @updated="refreshReels()"
+                  @deleted="refreshReels()"
                 />
               </div>
             </div>
@@ -476,45 +555,21 @@ function onFileInput(e: Event) {
       </div>
     </div>
 
-    <!-- Delete confirmation modal -->
-    <UModal v-model:open="deleteModalOpen" title="Delete recording">
+    <!-- Delete all done reels modal -->
+    <UModal v-model:open="deleteAllDoneModalOpen" title="Delete all done reels">
       <template #body>
         <p class="text-sm text-(--ui-text-muted)">
-          Are you sure you want to delete
-          <span class="font-medium text-(--ui-text)">{{ reelToDelete?.original_name || reelToDelete?.filename }}</span>?
-          This action cannot be undone.
+          Delete all done reels? This will permanently remove {{ doneReelCount }} recording{{ doneReelCount !== 1 ? 's' : '' }}. This action cannot be undone.
         </p>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2 w-full">
-          <UButton label="Cancel" color="neutral" variant="outline" @click="deleteModalOpen = false" />
-          <UButton label="Delete" color="error" :loading="deleteLoading" @click="deleteReel" />
+          <UButton label="Cancel" color="neutral" variant="outline" @click="deleteAllDoneModalOpen = false" />
+          <UButton label="Delete" color="error" :loading="deleteAllDoneLoading" @click="deleteAllDoneReels" />
         </div>
       </template>
     </UModal>
 
-    <!-- Rename modal -->
-    <UModal v-model:open="renameModalOpen" title="Rename recording">
-      <template #body>
-        <div class="space-y-4">
-          <UFormField label="Name" name="name">
-            <UInput
-              v-model="renameValue"
-              placeholder="Recording name"
-              class="w-full"
-              autofocus
-              @keyup.enter="renameReel"
-            />
-          </UFormField>
-        </div>
-      </template>
-      <template #footer>
-        <div class="flex justify-end gap-2 w-full">
-          <UButton label="Cancel" color="neutral" variant="outline" @click="renameModalOpen = false" />
-          <UButton label="Rename" :loading="renameLoading" :disabled="!renameValue.trim()" @click="renameReel" />
-        </div>
-      </template>
-    </UModal>
   </div>
 </template>
 
@@ -635,6 +690,33 @@ function onFileInput(e: Event) {
   color: #ff4070;
   background: rgba(255, 64, 112, 0.1);
 }
+/* ── Status filter toggle ── */
+.filter-status-toggle {
+  display: flex;
+  border-radius: 0.375rem;
+  overflow: hidden;
+  border: 1px solid var(--ui-border);
+}
+.filter-status-btn {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  padding: 0.25rem 0.625rem;
+  color: var(--ui-text-dimmed);
+  background: var(--ui-bg);
+  transition: all 0.12s;
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+.filter-status-btn:hover {
+  color: var(--ui-text-muted);
+}
+.filter-status-btn-active {
+  color: var(--ui-text-highlighted);
+  background: var(--ui-bg-accented);
+  font-weight: 600;
+}
+
 .filtered-empty {
   display: flex;
   flex-direction: column;
@@ -690,6 +772,40 @@ function onFileInput(e: Event) {
   justify-content: center;
   backdrop-filter: blur(4px);
 }
+.reel-done-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: #22c55e;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  z-index: 1;
+}
+.reel-share-badge {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 0.625rem;
+  color: #60a5fa;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  border-radius: 0.375rem;
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  z-index: 1;
+}
 .reel-info {
   display: flex;
   align-items: center;
@@ -697,7 +813,37 @@ function onFileInput(e: Event) {
   padding: 0.875rem 1rem;
   border-top: 1px solid var(--ui-border);
 }
+.reel-assignee {
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 50%;
+  background: rgba(255, 64, 112, 0.15);
+  border: 1px solid rgba(255, 64, 112, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: #ff4070;
+  flex-shrink: 0;
+}
 
+/* ── Tags ── */
+.reel-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+.reel-tag {
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ui-text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
 /* ── Reel groups ── */
 .reel-groups {
   display: flex;

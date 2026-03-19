@@ -252,7 +252,139 @@ function startReconfigure() {
   currentIntegration.value = null
 }
 
-onMounted(loadIntegration)
+// ── Webhook / Notifications ─────────────────────────────────────────────────
+const webhookLoading = ref(true)
+const webhookSaving = ref(false)
+const webhookTesting = ref(false)
+const webhookRemoving = ref(false)
+const webhookError = ref('')
+const webhookSuccess = ref('')
+
+const webhookUrl = ref('')
+const webhookEvents = reactive({
+  new_reel: true,
+  new_comment: true,
+  reel_done: true,
+})
+
+interface WebhookConfig {
+  url: string
+  events: string[]
+}
+
+const currentWebhook = ref<WebhookConfig | null>(null)
+
+const webhookBaseUrl = computed(() => `/api/workspaces/${props.workspaceId}/apps/${props.appId}/webhook`)
+
+async function loadWebhook() {
+  webhookLoading.value = true
+  webhookError.value = ''
+  try {
+    const data = await $fetch<any>(webhookBaseUrl.value, {
+      headers: props.headers,
+    })
+    const url = data?.url || data?.webhookUrl
+    const events = data?.events || data?.webhookEvents
+    if (url) {
+      currentWebhook.value = { url, events: events || [] }
+      webhookUrl.value = url
+      webhookEvents.new_reel = events?.includes('new_reel') ?? true
+      webhookEvents.new_comment = events?.includes('new_comment') ?? true
+      webhookEvents.reel_done = events?.includes('reel_done') ?? true
+    } else {
+      currentWebhook.value = null
+    }
+  } catch (e: any) {
+    if (e?.statusCode !== 404) {
+      webhookError.value = e?.data?.message || e?.message || 'Failed to load webhook config'
+    }
+    currentWebhook.value = null
+  } finally {
+    webhookLoading.value = false
+  }
+}
+
+async function saveWebhook() {
+  if (!webhookUrl.value.trim()) return
+  webhookSaving.value = true
+  webhookError.value = ''
+  webhookSuccess.value = ''
+  try {
+    const selectedEvents = Object.entries(webhookEvents)
+      .filter(([, v]) => v)
+      .map(([k]) => k)
+    await $fetch(webhookBaseUrl.value, {
+      method: 'PUT',
+      headers: props.headers,
+      body: { url: webhookUrl.value.trim(), events: selectedEvents },
+    })
+    await loadWebhook()
+    webhookTestSuccess.value = false
+  } catch (e: any) {
+    webhookError.value = e?.data?.message || e?.message || 'Failed to save webhook'
+  } finally {
+    webhookSaving.value = false
+  }
+}
+
+const webhookTestSuccess = ref(false)
+
+async function testWebhook() {
+  if (!webhookUrl.value.trim()) return
+  webhookTesting.value = true
+  webhookError.value = ''
+  webhookSuccess.value = ''
+  webhookTestSuccess.value = false
+  try {
+    // Save config first so the server knows the URL
+    const selectedEvents = Object.entries(webhookEvents)
+      .filter(([, v]) => v)
+      .map(([k]) => k)
+    await $fetch(webhookBaseUrl.value, {
+      method: 'PUT',
+      headers: props.headers,
+      body: { url: webhookUrl.value.trim(), events: selectedEvents },
+    })
+    // Send test payload via server (avoids CORS issues)
+    await $fetch(`${webhookBaseUrl.value}-test`, {
+      method: 'POST',
+      headers: props.headers,
+    })
+    webhookTestSuccess.value = true
+  } catch (e: any) {
+    webhookError.value = e?.data?.message || e?.message || 'Test webhook failed'
+  } finally {
+    webhookTesting.value = false
+  }
+}
+
+async function removeWebhook() {
+  webhookRemoving.value = true
+  webhookError.value = ''
+  webhookSuccess.value = ''
+  try {
+    await $fetch(webhookBaseUrl.value, {
+      method: 'PUT',
+      headers: props.headers,
+      body: { url: null },
+    })
+    currentWebhook.value = null
+    webhookUrl.value = ''
+    webhookEvents.new_reel = true
+    webhookEvents.new_comment = true
+    webhookEvents.reel_done = true
+    webhookTestSuccess.value = false
+  } catch (e: any) {
+    webhookError.value = e?.data?.message || e?.message || 'Failed to remove webhook'
+  } finally {
+    webhookRemoving.value = false
+  }
+}
+
+onMounted(() => {
+  loadIntegration()
+  loadWebhook()
+})
 </script>
 
 <template>
@@ -461,6 +593,120 @@ onMounted(loadIntegration)
 
     <!-- Error alert -->
     <UAlert v-if="error" color="error" variant="soft" :description="error" />
+
+    <!-- ── Notifications (Webhook) ─────────────────────────────────────────── -->
+    <div class="section-divider">
+      <span class="section-divider-label">Notifications</span>
+    </div>
+
+    <!-- Webhook loading skeleton -->
+    <div v-if="webhookLoading" class="settings-card space-y-4">
+      <div class="h-4 w-48 rounded bg-(--ui-bg) animate-pulse" />
+      <div class="h-10 w-full rounded bg-(--ui-bg) animate-pulse" />
+    </div>
+
+    <!-- Webhook connected state -->
+    <div v-else-if="currentWebhook" class="space-y-4">
+      <div class="settings-card space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <svg class="w-5 h-5 text-(--ui-text-muted)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <div>
+              <p class="text-sm font-medium text-(--ui-text)">Webhook</p>
+              <p class="text-xs text-(--ui-text-dimmed) mt-0.5 font-mono truncate">{{ currentWebhook.url }}</p>
+            </div>
+          </div>
+          <UBadge label="Connected" color="success" variant="subtle" />
+        </div>
+        <div class="flex flex-wrap gap-2 text-xs text-(--ui-text-muted)">
+          <span v-if="currentWebhook.events?.includes('new_reel')" class="webhook-event-tag">New recording</span>
+          <span v-if="currentWebhook.events?.includes('new_comment')" class="webhook-event-tag">New comment</span>
+          <span v-if="currentWebhook.events?.includes('reel_done')" class="webhook-event-tag">Reel marked done</span>
+        </div>
+      </div>
+
+      <div class="flex gap-2">
+        <UButton
+          label="Reconfigure"
+          icon="i-lucide-settings"
+          size="sm"
+          variant="outline"
+          color="neutral"
+          @click="currentWebhook = null"
+        />
+        <UButton
+          label="Remove"
+          icon="i-lucide-trash-2"
+          size="sm"
+          variant="soft"
+          color="error"
+          :loading="webhookRemoving"
+          @click="removeWebhook"
+        />
+      </div>
+    </div>
+
+    <!-- Webhook configuration form -->
+    <div v-else class="settings-card space-y-4">
+      <p class="text-sm text-(--ui-text-muted)">
+        Receive notifications via Slack, Discord, Mattermost, or any webhook-compatible service.
+      </p>
+
+      <UFormField label="Webhook URL">
+        <UInput
+          v-model="webhookUrl"
+          placeholder="https://hooks.slack.com/..."
+          class="w-full"
+        />
+      </UFormField>
+
+      <div>
+        <p class="text-xs font-semibold text-(--ui-text-muted) uppercase tracking-wider mb-2">Events</p>
+        <div class="flex flex-col gap-2">
+          <UCheckbox
+            v-model="webhookEvents.new_reel"
+            label="New recording"
+          />
+          <UCheckbox
+            v-model="webhookEvents.new_comment"
+            label="New comment"
+          />
+          <UCheckbox
+            v-model="webhookEvents.reel_done"
+            label="Reel marked done"
+          />
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <UButton
+          label="Test webhook"
+          icon="i-lucide-zap"
+          size="sm"
+          variant="outline"
+          color="neutral"
+          :loading="webhookTesting"
+          :disabled="!webhookUrl.trim()"
+          @click="testWebhook"
+        />
+        <UBadge v-if="webhookTestSuccess" label="Test successful" color="success" variant="subtle" />
+      </div>
+
+      <div v-if="webhookTestSuccess" class="flex justify-end">
+        <UButton
+          label="Save"
+          icon="i-lucide-check"
+          size="sm"
+          :loading="webhookSaving"
+          @click="saveWebhook"
+        />
+      </div>
+    </div>
+
+    <!-- Webhook error alert -->
+    <UAlert v-if="webhookError" color="error" variant="soft" :description="webhookError" />
   </div>
 </template>
 
@@ -495,5 +741,38 @@ onMounted(loadIntegration)
   border-color: #ff4070;
   color: white;
   background: rgba(255, 64, 112, 0.06);
+}
+
+.section-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.section-divider::before,
+.section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--ui-border);
+}
+
+.section-divider-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ui-text-muted);
+  white-space: nowrap;
+}
+
+.webhook-event-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--ui-bg);
+  border: 1px solid var(--ui-border);
+  font-size: 0.6875rem;
 }
 </style>

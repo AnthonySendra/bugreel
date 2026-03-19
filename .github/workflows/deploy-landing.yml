@@ -1,0 +1,56 @@
+name: Deploy landing to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/pages/index.vue'
+      - 'app/nuxt.config.ts'
+      - 'app/app.config.ts'
+      - 'app/package.json'
+      - '.github/workflows/deploy-landing.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Generate static landing
+        working-directory: app
+        run: |
+          NUXT_PUBLIC_STATIC_LANDING=true npx nuxt generate
+          rm -rf .output/public/rrweb.* .output/public/sdk .output/public/demo
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/.output/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

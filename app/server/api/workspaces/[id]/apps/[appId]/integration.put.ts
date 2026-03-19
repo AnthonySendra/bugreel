@@ -1,5 +1,6 @@
 import { db } from '~/server/utils/db'
 import { requireWorkspaceAccess } from '~/server/utils/workspace-access'
+import { validatePublicUrl } from '~/server/utils/url-validator'
 
 interface AppRow {
   id: string
@@ -53,6 +54,11 @@ export default defineEventHandler(async (event) => {
     if (!config.siteUrl || typeof config.siteUrl !== 'string') {
       throw createError({ statusCode: 400, message: 'config.siteUrl is required for Jira' })
     }
+    try {
+      await validatePublicUrl(config.siteUrl)
+    } catch (e: any) {
+      throw createError({ statusCode: 400, message: e.message || 'Invalid Jira site URL' })
+    }
     if (!config.email || typeof config.email !== 'string') {
       throw createError({ statusCode: 400, message: 'config.email is required for Jira' })
     }
@@ -68,5 +74,5 @@ export default defineEventHandler(async (event) => {
 
   db.prepare('UPDATE apps SET ticket_provider = ?, ticket_config = ? WHERE id = ?').run(provider, configJson, appId)
 
-  return { provider, config }
+  return { provider }
 })

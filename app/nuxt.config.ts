@@ -12,6 +12,10 @@ export default defineNuxtConfig({
     s3AccessKeyId: '',
     s3SecretAccessKey: '',
 
+    // Auto-purge: delete 'done' reels older than this many days (default 7)
+    // Env var: NUXT_PURGE_DONE_DAYS
+    purgeDoneDays: '7',
+
     // Email (all optional — when NUXT_EMAIL_PROVIDER is empty, email is disabled
     // and features like email verification are skipped)
     // NUXT_EMAIL_PROVIDER: 'smtp' | 'resend' | 'console' | '' (disabled)
@@ -21,6 +25,7 @@ export default defineNuxtConfig({
     // NUXT_PUBLIC_BASE_URL: public URL for links in emails (default: http://localhost:7777)
     public: {
       baseUrl: '',
+      staticLanding: '',
     },
   },
   modules: ['@nuxt/ui'],

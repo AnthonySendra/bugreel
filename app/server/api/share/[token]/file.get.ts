@@ -3,14 +3,27 @@ import { join } from 'path'
 import { sendStream } from 'h3'
 import { db, reelsDir } from '~/server/utils/db'
 import { getS3Config, presignedGetUrl } from '~/server/utils/s3'
-import { requireReelAccess } from '~/server/utils/workspace-access'
+
+interface SharedReel {
+  id: string
+  filename: string
+  original_name: string | null
+  share_token: string
+  share_expires_at: number | null
+}
 
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-  if (!user) throw createError({ statusCode: 401, message: 'Unauthorized' })
+  const token = getRouterParam(event, 'token')!
 
-  const reelId = getRouterParam(event, 'id')!
-  const { reel } = requireReelAccess(reelId, user.id)
+  const reel = db
+    .prepare('SELECT id, filename, original_name, share_token, share_expires_at FROM reels WHERE share_token = ?')
+    .get(token) as SharedReel | undefined
+
+  if (!reel) throw createError({ statusCode: 404, message: 'Shared reel not found' })
+
+  if (reel.share_expires_at && reel.share_expires_at < Date.now()) {
+    throw createError({ statusCode: 410, message: 'Share link has expired' })
+  }
 
   // S3 mode: redirect to presigned GET URL
   if (getS3Config()) {

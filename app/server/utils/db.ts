@@ -80,6 +80,15 @@ try { db.exec('ALTER TABLE apps ADD COLUMN ticket_provider TEXT DEFAULT NULL') }
 try { db.exec('ALTER TABLE apps ADD COLUMN ticket_config TEXT DEFAULT NULL') } catch {}
 try { db.exec('ALTER TABLE reels ADD COLUMN ticket_id TEXT DEFAULT NULL') } catch {}
 try { db.exec('ALTER TABLE reels ADD COLUMN ticket_url TEXT DEFAULT NULL') } catch {}
+try { db.exec('ALTER TABLE reels ADD COLUMN status TEXT DEFAULT \'open\'') } catch {}
+try { db.exec('ALTER TABLE reels ADD COLUMN ticket_sync_skip INTEGER DEFAULT 0') } catch {}
+try { db.exec('ALTER TABLE reels ADD COLUMN assigned_user_id TEXT DEFAULT NULL') } catch {}
+try { db.exec('ALTER TABLE reels ADD COLUMN tags TEXT DEFAULT NULL') } catch {}
+try { db.exec('ALTER TABLE reels ADD COLUMN share_token TEXT DEFAULT NULL') } catch {}
+try { db.exec('ALTER TABLE reels ADD COLUMN share_expires_at INTEGER DEFAULT NULL') } catch {}
+try { db.exec('ALTER TABLE apps ADD COLUMN webhook_url TEXT DEFAULT NULL') } catch {}
+try { db.exec('ALTER TABLE apps ADD COLUMN webhook_events TEXT DEFAULT NULL') } catch {}
+try { db.exec('ALTER TABLE reels ADD COLUMN is_screenshot INTEGER DEFAULT 0') } catch {}
 
 // Migrate api_tokens: remove workspace_id, make app_id NOT NULL (tokens are app-scoped now)
 {
@@ -133,6 +142,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_reel_comments_reel_id ON reel_comments(reel_id);
   CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_id ON workspace_members(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_api_tokens_app_id ON api_tokens(app_id);
+  CREATE INDEX IF NOT EXISTS idx_reels_share_token ON reels(share_token);
 `)
 
 export { db, reelsDir }

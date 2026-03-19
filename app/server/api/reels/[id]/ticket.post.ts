@@ -164,7 +164,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Update reel with ticket info
-  db.prepare('UPDATE reels SET ticket_id = ?, ticket_url = ? WHERE id = ?').run(ticketId, ticketUrl, reelId)
+  db.prepare('UPDATE reels SET ticket_id = ?, ticket_url = ?, original_name = ? WHERE id = ?').run(ticketId, ticketUrl, `${ticketId} - ${title}`, reelId)
 
   return { ticketId, ticketUrl }
 })

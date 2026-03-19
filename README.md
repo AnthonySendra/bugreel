@@ -46,8 +46,28 @@ I looked for a self-hostable equivalent and couldn't find one. So Claude built t
 | Works without install | ❌ | ✅ |
 | Auto-upload to workspace | ✅ | ✅ |
 | Local download fallback | ✅ | ✅ |
+| Permanent recording (rolling buffer) | ❌ | ✅ configurable duration |
 
 Recordings are saved as `.reel` files — gzipped JSON containing all streams.
+
+The SDK supports **permanent recording mode**: instead of manual start/stop, it records continuously in a rolling buffer of a configurable duration (e.g. 10 seconds). When the user clicks "Report Bug", only the last N seconds are captured and uploaded — no need to reproduce the bug, it's already recorded.
+
+### Ticket integrations
+
+Connect your apps to **Linear** or **Jira** to streamline your bug workflow:
+
+- **Create tickets from recordings** — after stopping a recording (SDK) or from the reel player (dashboard), open a modal to create a ticket with a title and description. The reel URL is automatically appended.
+- **Bidirectional sync** — marking a reel as "done" closes the linked ticket on Linear/Jira. A background sync job (every 5 min) checks ticket statuses and marks reels as done when their ticket is completed on the provider side.
+- **Reel naming** — when a ticket is created, the reel is automatically renamed to `TICKET-ID - Title` for easy identification.
+- **Configuration** — set up integrations per app in the **Integrations** tab (API key for Linear, site URL + email + API token for Jira). Test connection before saving.
+
+### Webhook notifications (Slack, Discord, Mattermost)
+
+Set up webhook notifications per app in the **Integrations** tab:
+
+- **Events** — get notified on new recordings, new comments, or reels marked as done
+- **Compatible with** Slack incoming webhooks, Discord webhooks, Mattermost incoming webhooks, or any HTTP endpoint that accepts JSON POST requests
+- **Test** — send a test payload from the UI to verify your webhook is working before saving
 
 ### Storage
 
@@ -150,6 +170,7 @@ Mount a named volume or host path to preserve data across container restarts.
 | `NUXT_EMAIL_SMTP_USER` | no | SMTP user |
 | `NUXT_EMAIL_SMTP_PASS` | no | SMTP password |
 | `NUXT_EMAIL_RESEND_API_KEY` | no | Resend API key |
+| `NUXT_PURGE_DONE_DAYS` | no | Days to keep done reels before auto-deletion (default: 7) |
 | `ALLOWED_EMAIL_DOMAINS` | no | Comma-separated list of allowed email domains for registration (e.g. `acme.com,example.io`) |
 
 ---

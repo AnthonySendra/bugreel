@@ -26,6 +26,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Invalid email address' })
   }
 
+  if (typeof password !== 'string' || password.length > 128) {
+    throw createError({ statusCode: 400, message: 'Invalid email or password' })
+  }
+
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase()) as UserRow | undefined
 
   if (!user) {
