@@ -35,10 +35,13 @@ jobs:
         working-directory: app
         run: npm ci
 
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
       - name: Generate static landing
         working-directory: app
         run: |
-          NUXT_PUBLIC_STATIC_LANDING=true npx nuxt generate
+          NUXT_APP_BASE_URL=/bugreel/ NUXT_PUBLIC_STATIC_LANDING=true npx nuxt generate
           rm -rf .output/public/rrweb.* .output/public/sdk .output/public/demo
 
       - uses: actions/upload-pages-artifact@v3
