@@ -1,12 +1,15 @@
-# bugreel
+<div align="center">
 
-> A self-hosted alternative to [jam.dev](https://jam.dev).
-
+<h1>bugreel</h1>
 Record bugs without screen recording — capture DOM, console, and network as a structured, replayable file you can host yourself.
 
 No SaaS, no tracking, no vendor lock-in. Runs on your own infrastructure.
 
-![bugreel demo](demo.gif)
+<a href="https://anthonysendra.github.io/bugreel/">Website</a>
+
+![Demo](./demo.gif)
+
+</div>
 
 ## Why?
 

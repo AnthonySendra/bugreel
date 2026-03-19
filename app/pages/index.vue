@@ -55,7 +55,7 @@ function copyToClipboard(text: string, id: string) {
             <UButton v-if="isLoggedIn" to="/dashboard" size="lg" label="Dashboard" />
             <UButton v-else to="/register" size="lg" label="Create an account" />
           </template>
-          <UButton href="#setup" size="lg" variant="outline" color="neutral" label="Setup guide" />
+          <UButton :href="isStatic ? '#install' : '#setup'" size="lg" variant="outline" color="neutral" :label="isStatic ? 'Install' : 'Setup guide'" />
           <UButton href="https://github.com/AnthonySendra/bugreel" target="_blank" size="lg" variant="outline" color="neutral" icon="i-lucide-github" label="GitHub" />
         </div>
       </div>
@@ -166,6 +166,62 @@ function copyToClipboard(text: string, id: string) {
             </h3>
             <p class="text-sm text-neutral-400 leading-relaxed">Webhook notifications for new recordings, comments, and done reels. Works with Slack, Discord, Mattermost, or any HTTP endpoint.</p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Install (static landing only) -->
+    <section v-if="isStatic" id="install" class="pb-24 px-6 scroll-mt-20">
+      <div class="max-w-3xl mx-auto">
+        <h2 class="text-2xl font-bold text-white mb-2 text-center">Install</h2>
+        <p class="text-sm text-neutral-500 mb-10 text-center">Get bugreel running on your infrastructure in minutes.</p>
+
+        <div class="grid sm:grid-cols-2 gap-4 mb-6">
+          <!-- Docker -->
+          <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-3">
+            <div class="flex items-center gap-2 mb-1">
+              <UIcon name="i-lucide-container" class="text-bugreel-400 text-lg" />
+              <h3 class="text-white font-semibold text-sm">Docker</h3>
+            </div>
+            <div class="relative group">
+              <pre class="rounded-lg bg-neutral-950 border border-neutral-800 p-3 text-xs overflow-x-auto"><code class="text-neutral-300">docker run -p 7777:7777 \
+  -e NUXT_JWT_SECRET=your-secret \
+  -v bugreel-data:/data \
+  patatra/bugreel</code></pre>
+              <button
+                class="absolute top-2 right-2 p-1.5 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                @click="copyToClipboard('docker run -p 7777:7777 -e NUXT_JWT_SECRET=your-secret -v bugreel-data:/data patatra/bugreel', 'docker')"
+              >
+                <UIcon :name="copied === 'docker' ? 'i-lucide-check' : 'i-lucide-copy'" class="text-sm" />
+              </button>
+            </div>
+            <p class="text-xs text-neutral-500">Available at <code class="text-neutral-400">http://localhost:7777</code></p>
+          </div>
+
+          <!-- From source -->
+          <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-3">
+            <div class="flex items-center gap-2 mb-1">
+              <UIcon name="i-lucide-terminal" class="text-bugreel-400 text-lg" />
+              <h3 class="text-white font-semibold text-sm">From source</h3>
+            </div>
+            <div class="relative group">
+              <pre class="rounded-lg bg-neutral-950 border border-neutral-800 p-3 text-xs overflow-x-auto"><code class="text-neutral-300">git clone https://github.com/AnthonySendra/bugreel.git
+cd bugreel/app
+npm install
+NUXT_JWT_SECRET=your-secret npm run dev</code></pre>
+              <button
+                class="absolute top-2 right-2 p-1.5 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                @click="copyToClipboard('git clone https://github.com/AnthonySendra/bugreel.git && cd bugreel/app && npm install && NUXT_JWT_SECRET=your-secret npm run dev', 'source')"
+              >
+                <UIcon :name="copied === 'source' ? 'i-lucide-check' : 'i-lucide-copy'" class="text-sm" />
+              </button>
+            </div>
+            <p class="text-xs text-neutral-500">Available at <code class="text-neutral-400">http://localhost:7777</code></p>
+          </div>
+        </div>
+
+        <div class="text-center">
+          <UButton href="https://github.com/AnthonySendra/bugreel#readme" target="_blank" size="sm" variant="outline" color="neutral" icon="i-lucide-book-open" label="Full documentation" trailing-icon="i-lucide-external-link" />
         </div>
       </div>
     </section>
