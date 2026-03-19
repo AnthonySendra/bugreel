@@ -76,6 +76,10 @@ try { db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFA
 try { db.exec('ALTER TABLE reel_comments ADD COLUMN element_info TEXT') } catch {}
 try { db.exec('ALTER TABLE reels ADD COLUMN reporter_email TEXT') } catch {}
 try { db.exec('ALTER TABLE reels ADD COLUMN reporter_name TEXT') } catch {}
+try { db.exec('ALTER TABLE apps ADD COLUMN ticket_provider TEXT DEFAULT NULL') } catch {}
+try { db.exec('ALTER TABLE apps ADD COLUMN ticket_config TEXT DEFAULT NULL') } catch {}
+try { db.exec('ALTER TABLE reels ADD COLUMN ticket_id TEXT DEFAULT NULL') } catch {}
+try { db.exec('ALTER TABLE reels ADD COLUMN ticket_url TEXT DEFAULT NULL') } catch {}
 
 // Migrate api_tokens: remove workspace_id, make app_id NOT NULL (tokens are app-scoped now)
 {

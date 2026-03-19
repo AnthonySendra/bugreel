@@ -12,7 +12,7 @@ const headers = computed(() =>
 const sdkScriptUrl = import.meta.client ? `${window.location.origin}/sdk/recorder.js` : '/sdk/recorder.js'
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
-const validTabs = ['reels', 'tokens', 'settings'] as const
+const validTabs = ['reels', 'tokens', 'integrations', 'settings'] as const
 type AppTab = typeof validTabs[number]
 const initialTab = validTabs.includes(route.hash.slice(1) as any) ? (route.hash.slice(1) as AppTab) : 'reels'
 const activeTab = ref<AppTab>(initialTab)
@@ -85,6 +85,10 @@ function closeDeleteAppModal() {
         <UIcon name="i-lucide-key-round" class="w-4 h-4" />
         API Tokens
       </button>
+      <button class="tab-btn" :class="{ 'tab-active': activeTab === 'integrations' }" @click="activeTab = 'integrations'">
+        <UIcon name="i-lucide-plug" class="w-4 h-4" />
+        Integrations
+      </button>
       <button class="tab-btn" :class="{ 'tab-active': activeTab === 'settings' }" @click="activeTab = 'settings'">
         <UIcon name="i-lucide-settings" class="w-4 h-4" />
         Settings
@@ -104,6 +108,11 @@ function closeDeleteAppModal() {
     <!-- API Tokens content -->
     <div v-if="activeTab === 'tokens'" class="flex-1 px-10 py-8 w-full max-w-5xl mx-auto">
       <AppTokensTab :appId="appId" :headers="headers" />
+    </div>
+
+    <!-- Integrations content -->
+    <div v-if="activeTab === 'integrations'" class="flex-1 px-10 py-8 w-full max-w-5xl mx-auto">
+      <AppIntegrationsTab :appId="appId" :workspaceId="(route.params.id as string)" :headers="headers" />
     </div>
 
     <!-- Settings content -->

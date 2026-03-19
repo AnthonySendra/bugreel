@@ -41,6 +41,16 @@ const currentTimeDisplay = ref('0:00.0')
 const currentTimeMs = ref(0)
 const currentUrl = ref('')
 
+// ── Ticket integration ──────────────────────────────────────────────────────
+const ticketId = ref<string | null>(null)
+const ticketUrl = ref<string | null>(null)
+const ticketProvider = ref<string | null>(null)
+const ticketModalOpen = ref(false)
+const ticketTitle = ref('')
+const ticketDescription = ref('')
+const ticketCreating = ref(false)
+const ticketError = ref('')
+
 // ── Element pick mode (for linking comments to DOM elements) ──────────────────
 const pickModeActive = ref(false)
 const pinnedElement = ref<{
@@ -1462,10 +1472,50 @@ function hideElementHighlight() {
   hoverHighlightEl = null
 }
 
+// ── Ticket integration ───────────────────────────────────────────────────────
+async function loadTicketInfo() {
+  try {
+    const headers: Record<string, string> = token.value ? { Authorization: `Bearer ${token.value}` } : {}
+    const data = await $fetch<any>(`/api/reels/${reelId}/ticket`, { headers })
+    ticketId.value = data.ticket_id
+    ticketUrl.value = data.ticket_url
+    ticketProvider.value = data.ticket_provider
+  } catch {}
+}
+
+function openTicketModal() {
+  ticketTitle.value = ''
+  ticketDescription.value = ''
+  ticketError.value = ''
+  ticketModalOpen.value = true
+}
+
+async function createTicket() {
+  if (!ticketTitle.value.trim() || ticketCreating.value) return
+  ticketCreating.value = true
+  ticketError.value = ''
+  try {
+    const headers: Record<string, string> = token.value ? { Authorization: `Bearer ${token.value}` } : {}
+    const data = await $fetch<any>(`/api/reels/${reelId}/ticket`, {
+      method: 'POST',
+      headers,
+      body: { title: ticketTitle.value.trim(), description: ticketDescription.value.trim() },
+    })
+    ticketId.value = data.ticketId
+    ticketUrl.value = data.ticketUrl
+    ticketModalOpen.value = false
+  } catch (err: any) {
+    ticketError.value = err?.data?.message || err?.message || 'Failed to create ticket'
+  } finally {
+    ticketCreating.value = false
+  }
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(() => {
   loadReel()
   loadComments()
+  loadTicketInfo()
 })
 
 onUnmounted(() => {
@@ -1527,6 +1577,44 @@ onUnmounted(() => {
               <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
             </svg>
             <span>DOM</span>
+          </button>
+
+          <!-- Ticket integration -->
+          <a
+            v-if="ticketUrl && ticketId"
+            :href="ticketUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="meta-action meta-action--ticket-linked"
+            :title="`Open ticket ${ticketId}`"
+          >
+            <!-- Linear icon -->
+            <svg v-if="ticketProvider === 'linear'" width="13" height="13" viewBox="0 0 100 100" fill="currentColor">
+              <path d="M1.22541 61.5228c-.97437 2.2107.67508 4.8855 3.04498 4.8855 1.21745 0 2.33584-.684 2.88498-1.7683l28.8001-56.8116c1.2869-2.53813-.5765-5.4844-3.3628-5.3155-1.2207.0739-2.2928.8074-2.8271 1.934L1.22541 61.5228ZM21.9282 73.128c-1.4791 2.233.3765 5.2066 3.0523 4.8953 1.1506-.1338 2.1375-.882 2.618-1.989L52.7999 17.2246c1.0832-2.4997-.7741-5.2246-3.4633-5.0863-1.1696.0602-2.1942.7877-2.7232 1.9257L21.9282 73.128ZM42.2913 84.8795c-1.7076 2.2335.1916 5.3702 3.0732 5.0835 1.1086-.1103 2.0758-.8327 2.5766-1.9252L73.34 37.0486c.996-2.1724-.4606-4.6742-2.8268-4.8519-1.1968-.0898-2.3344.5326-2.9695 1.6189L42.2913 84.8795ZM62.8382 96.4565c-1.6501 2.1877.1247 5.2645 2.9523 5.0555.948-.0701 1.8124-.552 2.3135-1.2913.0461-.068.0909-.1377.1344-.2088L98.0547 37.2924c1.0035-2.1909-.4511-4.7088-2.835-4.8987-1.2057-.0961-2.358.5291-2.9928 1.6229L62.8382 96.4565Z"/>
+            </svg>
+            <!-- Jira icon -->
+            <svg v-else-if="ticketProvider === 'jira'" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84H11.53ZM6.77 7.17c0 2.4 1.96 4.35 4.34 4.35h1.78v1.7c0 2.4 1.97 4.35 4.35 4.35V7.99a.84.84 0 0 0-.84-.82H6.77ZM2 12.31c0 2.4 1.97 4.35 4.35 4.36h1.78v1.7c.01 2.39 1.97 4.34 4.35 4.34v-9.57a.84.84 0 0 0-.84-.84L2 12.31Z"/>
+            </svg>
+            <!-- Generic ticket icon -->
+            <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 5v2"/><path d="M15 11v2"/><path d="M15 17v2"/>
+              <rect x="3" y="4" width="18" height="16" rx="2"/>
+            </svg>
+            <span>{{ ticketId }}</span>
+          </a>
+          <button
+            v-else-if="ticketProvider && !ticketUrl"
+            class="meta-action meta-action--ticket-create"
+            title="Create a ticket"
+            @click="openTicketModal"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 5v2"/><path d="M15 11v2"/><path d="M15 17v2"/>
+              <rect x="3" y="4" width="18" height="16" rx="2"/>
+              <line x1="9" y1="12" x2="5" y2="12"/><line x1="7" y1="10" x2="7" y2="14"/>
+            </svg>
+            <span>Create ticket</span>
           </button>
         </div>
       </div>
@@ -1831,6 +1919,44 @@ onUnmounted(() => {
         <span ref="timeDisplayEl" id="time-display">0:00.0 / 0:00.0</span>
       </div>
     </template>
+
+    <!-- Ticket creation modal -->
+    <div v-if="ticketModalOpen" class="ticket-overlay" @click.self="ticketModalOpen = false">
+      <div class="ticket-modal">
+        <div class="ticket-modal-header">
+          <span class="ticket-modal-title">Create ticket</span>
+          <button class="ticket-modal-close" @click="ticketModalOpen = false">&times;</button>
+        </div>
+        <div class="ticket-modal-body">
+          <div v-if="ticketError" class="ticket-error">{{ ticketError }}</div>
+          <label class="ticket-label">
+            Title
+            <input
+              v-model="ticketTitle"
+              class="ticket-input"
+              type="text"
+              placeholder="Bug title…"
+              @keydown.enter.prevent="createTicket"
+            />
+          </label>
+          <label class="ticket-label">
+            Description
+            <textarea
+              v-model="ticketDescription"
+              class="ticket-textarea"
+              rows="4"
+              placeholder="Describe the issue…"
+            />
+          </label>
+        </div>
+        <div class="ticket-modal-footer">
+          <button class="ticket-btn ticket-btn--cancel" @click="ticketModalOpen = false">Cancel</button>
+          <button class="ticket-btn ticket-btn--create" :disabled="!ticketTitle.trim() || ticketCreating" @click="createTicket">
+            {{ ticketCreating ? 'Creating…' : 'Create' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1997,6 +2123,165 @@ onUnmounted(() => {
   border-color: rgba(251, 191, 36, 0.40);
   color: #fde68a;
   background: rgba(76, 141, 255, 0.08);
+}
+.meta-action--ticket-linked {
+  background: rgba(167, 139, 250, 0.10);
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.20);
+  text-decoration: none;
+}
+.meta-action--ticket-linked:hover {
+  background: rgba(167, 139, 250, 0.18);
+  border-color: rgba(167, 139, 250, 0.40);
+  color: #ddd6fe;
+}
+.meta-action--ticket-create {
+  background: rgba(167, 139, 250, 0.10);
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.20);
+}
+.meta-action--ticket-create:hover {
+  background: rgba(167, 139, 250, 0.18);
+  border-color: rgba(167, 139, 250, 0.40);
+  color: #ddd6fe;
+}
+
+/* ── Ticket modal ────────────────────────────────────────────────────────── */
+.ticket-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+.ticket-modal {
+  background: #1c1c1f;
+  border: 1px solid #2e2e33;
+  border-radius: 10px;
+  width: 420px;
+  max-width: 90vw;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+.ticket-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid #2e2e33;
+}
+.ticket-modal-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e2e6;
+}
+.ticket-modal-close {
+  background: none;
+  border: none;
+  color: #6b6b76;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.ticket-modal-close:hover {
+  color: #e2e2e6;
+}
+.ticket-modal-body {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ticket-error {
+  background: rgba(241, 99, 112, 0.12);
+  border: 1px solid rgba(241, 99, 112, 0.25);
+  color: #f9a8b0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+.ticket-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #a0a0ab;
+}
+.ticket-required {
+  color: #f16370;
+}
+.ticket-input {
+  background: #111113;
+  border: 1px solid #2e2e33;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #e2e2e6;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.ticket-input:focus {
+  border-color: #4c8dff;
+}
+.ticket-textarea {
+  background: #111113;
+  border: 1px solid #2e2e33;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #e2e2e6;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s;
+}
+.ticket-textarea:focus {
+  border-color: #4c8dff;
+}
+.ticket-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px 14px;
+  border-top: 1px solid #2e2e33;
+}
+.ticket-btn {
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ticket-btn--cancel {
+  background: #242428;
+  color: #a0a0ab;
+  border-color: #2e2e33;
+}
+.ticket-btn--cancel:hover {
+  background: #2e2e33;
+  color: #e2e2e6;
+}
+.ticket-btn--create {
+  background: rgba(167, 139, 250, 0.20);
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.30);
+}
+.ticket-btn--create:hover:not(:disabled) {
+  background: rgba(167, 139, 250, 0.30);
+  border-color: rgba(167, 139, 250, 0.50);
+  color: #ddd6fe;
+}
+.ticket-btn--create:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 /* ── Main ────────────────────────────────────────────────────────────────── */
 #main {

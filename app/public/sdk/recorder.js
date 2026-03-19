@@ -50,12 +50,15 @@
 
   var state = {
     isRecording: false,
+    isPermanent: false,      // permanent recording mode
+    permanentDuration: 30,   // max seconds to keep in permanent mode
     startTime: null,
     rrwebStopFn: null,
     rrwebEvents: [],
     consoleEvents: [],
     networkEvents: [],
     interactionEvents: [],
+    ticketProvider: null,
   };
 
   var cfg = {};
@@ -110,6 +113,153 @@
     var s = Math.floor(ms / 1000);
     var m = Math.floor(s / 60);
     return m > 0 ? m + 'm ' + (s % 60) + 's' : s + 's';
+  }
+
+  function formatTime(date) {
+    var h = date.getHours().toString().padStart(2, '0');
+    var m = date.getMinutes().toString().padStart(2, '0');
+    var s = date.getSeconds().toString().padStart(2, '0');
+    return h + ':' + m + ':' + s;
+  }
+
+  // Trim rrweb events to keep only the last `windowMs` milliseconds.
+  // `evts` is modified in place. Returns the chosen snapshot index or -1.
+  function trimEventsToWindow(evts, windowMs) {
+    if (evts.length < 2) return -1;
+    var lastTs = evts[evts.length - 1].timestamp;
+
+    // Collect snapshots (type 2) with their span to the last event
+    var snapshots = [];
+    for (var i = 0; i < evts.length; i++) {
+      if (evts[i].type === 2) {
+        snapshots.push({ idx: i, span: lastTs - evts[i].timestamp });
+      }
+    }
+    if (!snapshots.length) return -1;
+
+    // Pick the snapshot whose span is closest to windowMs but >= windowMs
+    // (i.e. the one just BEFORE the cutoff so we keep at least windowMs).
+    // Fallback to the closest overall if none is >= windowMs.
+    var bestSnap = null;
+    for (var s = 0; s < snapshots.length; s++) {
+      if (snapshots[s].span >= windowMs) {
+        if (!bestSnap || snapshots[s].span < bestSnap.span) {
+          bestSnap = snapshots[s];
+        }
+      }
+    }
+    if (!bestSnap) {
+      // No snapshot covers the full window — pick the one with the largest span
+      bestSnap = snapshots[0];
+      for (var t = 1; t < snapshots.length; t++) {
+        if (snapshots[t].span > bestSnap.span) bestSnap = snapshots[t];
+      }
+    }
+    var cutIdx = bestSnap.idx;
+
+    // Splice everything before cutIdx, keep one meta event
+    if (cutIdx > 0) {
+      var meta = null;
+      for (var m = 0; m < cutIdx; m++) {
+        if (evts[m].type === 4) {
+          meta = JSON.parse(JSON.stringify(evts[m]));
+          break;
+        }
+      }
+      evts.splice(0, cutIdx);
+      if (meta) {
+        meta.timestamp = evts[0].timestamp;
+        evts.unshift(meta);
+      }
+    }
+    return cutIdx;
+  }
+
+  // Periodic trim during recording — keeps a buffer of 1.5× the configured duration
+  // so the final trim always has enough data to cut exactly maxMs.
+  function trimPermanentBuffer() {
+    var maxMs = (state.permanentDuration || 10) * 1000;
+    var bufferMs = maxMs * 1.5;
+    trimEventsToWindow(state.rrwebEvents, bufferMs);
+
+    // Trim all secondary data to the same buffer window
+    if (state.rrwebEvents.length > 1) {
+      var windowStartTs = state.rrwebEvents[0].timestamp;
+      var relCutoff = windowStartTs - state.startTime;
+      state.consoleEvents = state.consoleEvents.filter(function (e) { return e.time >= relCutoff; });
+      state.networkEvents = state.networkEvents.filter(function (e) { return e.time >= relCutoff; });
+      state.interactionEvents = state.interactionEvents.filter(function (e) { return e.time >= relCutoff; });
+      // Trim PerformanceObserver network events
+      _perfNetworkEvents = _perfNetworkEvents.filter(function (e) { return e.time >= relCutoff; });
+      // Trim captured bodies — only keep URLs still referenced by network events
+      var activeUrls = {};
+      for (var i = 0; i < state.networkEvents.length; i++) {
+        var u = (state.networkEvents[i].url || '').split('?')[0];
+        if (u) activeUrls[u] = true;
+      }
+      for (var i = 0; i < _perfNetworkEvents.length; i++) {
+        var u = (_perfNetworkEvents[i].url || '').split('?')[0];
+        if (u) activeUrls[u] = true;
+      }
+      var newBodies = {};
+      for (var key in _capturedBodies) {
+        if (activeUrls[key]) newBodies[key] = _capturedBodies[key];
+      }
+      _capturedBodies = newBodies;
+      // Drop resolved pending body reads
+      if (_pendingBodyReads.length > 50) {
+        _pendingBodyReads = _pendingBodyReads.slice(-20);
+      }
+    }
+  }
+
+  // Final trim at stop — cuts to exactly maxMs
+  function trimPermanentFinal() {
+    var maxMs = (state.permanentDuration || 10) * 1000;
+    trimEventsToWindow(state.rrwebEvents, maxMs);
+
+    // After snapshot-based trim, the recording may still be slightly over maxMs
+    // because the snapshot sits before the cutoff. Hard-cap: drop rrweb events
+    // from the START (after meta+snapshot) until the span is <= maxMs.
+    var evts = state.rrwebEvents;
+    if (evts.length > 2) {
+      var lastTs = evts[evts.length - 1].timestamp;
+      var cutoff = lastTs - maxMs;
+      // Find first event to keep: skip meta (type 4), keep snapshot (type 2),
+      // then drop incremental events (type 3) that are before cutoff.
+      var firstKeep = 0;
+      for (var i = 0; i < evts.length; i++) {
+        if (evts[i].type === 4 || evts[i].type === 2) continue; // always keep meta+snapshot
+        if (evts[i].timestamp < cutoff) {
+          firstKeep = i + 1;
+        } else {
+          break;
+        }
+      }
+      if (firstKeep > 0) {
+        // Collect meta+snapshot events before firstKeep
+        var head = [];
+        for (var h = 0; h < firstKeep; h++) {
+          if (evts[h].type === 4 || evts[h].type === 2) head.push(evts[h]);
+        }
+        evts.splice(0, firstKeep);
+        for (var p = head.length - 1; p >= 0; p--) {
+          evts.unshift(head[p]);
+        }
+        // Update meta timestamp to match the actual window start
+        if (evts[0].type === 4) {
+          evts[0].timestamp = cutoff;
+        }
+      }
+    }
+
+    if (evts.length > 1) {
+      var windowStartTs = evts[0].timestamp;
+      var relCutoff = windowStartTs - state.startTime;
+      state.consoleEvents = state.consoleEvents.filter(function (e) { return e.time >= relCutoff; });
+      state.networkEvents = state.networkEvents.filter(function (e) { return e.time >= relCutoff; });
+      state.interactionEvents = state.interactionEvents.filter(function (e) { return e.time >= relCutoff; });
+    }
   }
 
   // ── Console interception ───────────────────────────────────────────────────
@@ -491,7 +641,8 @@
     if (!global.rrweb) { console.warn('[bugreel] rrweb not loaded'); return; }
     state.rrwebStopFn = global.rrweb.record({
       emit: function (event) { state.rrwebEvents.push(event); },
-      checkoutEveryNth: 200,
+      // In permanent mode, take full snapshots more often so trimming works well
+      checkoutEveryNth: state.isPermanent ? 10 : 200,
       maskInputOptions: { password: true },
       userTriggeredOnInput: false,
       inlineStylesheet: true,
@@ -584,6 +735,8 @@
   // ── Widget ─────────────────────────────────────────────────────────────────
 
   var WIDGET_ID = '__bugreel_widget__';
+  var _trimInterval = null;
+  var _snapshotInterval = null;
 
   function createWidget() {
     if (doc.getElementById(WIDGET_ID)) return;
@@ -591,51 +744,385 @@
     wrap.id = WIDGET_ID;
     wrap.innerHTML = [
       '<style>',
-      '#__br_btn{',
+      '#__br_group{',
         'position:fixed;bottom:20px;right:20px;z-index:2147483647;',
-        'display:flex;align-items:center;gap:7px;',
-        'padding:9px 15px;border-radius:8px;border:none;cursor:pointer;',
-        'font-size:13px;font-weight:600;color:#fff;',
+        'display:flex;align-items:stretch;',
+        'border-radius:8px;overflow:hidden;',
+        'box-shadow:0 2px 12px rgba(0,0,0,.3);',
         'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
-        'background:#e53e3e;box-shadow:0 2px 12px rgba(0,0,0,.3);',
-        'transition:background .15s,transform .1s,opacity .2s;user-select:none;',
-        'opacity:.45;',
+        'opacity:.45;transition:opacity .2s;user-select:none;',
       '}',
-      '#__br_btn:hover{background:#c53030;opacity:1}',
+      '#__br_group:hover{opacity:1}',
+      '#__br_group.br-recording,#__br_group.br-saving,#__br_group.br-done,#__br_group.br-permanent{opacity:1}',
+      '#__br_btn{',
+        'display:flex;align-items:center;gap:7px;',
+        'padding:9px 15px;border:none;cursor:pointer;',
+        'font-size:13px;font-weight:600;color:#fff;',
+        'font-family:inherit;background:#ff4070;',
+        'transition:background .15s;',
+      '}',
+      '#__br_btn:hover{background:#e0325a}',
       '#__br_btn:active{transform:scale(.97)}',
-      '#__br_btn.br-recording{background:#1a1a1a;border:1px solid #444;opacity:1}',
-      '#__br_btn.br-recording:hover{background:#2d2d2d}',
-      '#__br_btn.br-saving{background:#1a1a1a;border:1px solid #444;opacity:.65;cursor:default}',
-      '#__br_btn.br-done{background:#16a34a;opacity:1;cursor:default}',
-      '#__br_btn.br-done:hover{background:#16a34a}',
+      '#__br_chevron{',
+        'display:flex;align-items:center;justify-content:center;',
+        'width:32px;border:none;cursor:pointer;',
+        'background:#e0325a;color:#fff;font-family:inherit;',
+        'border-left:1px solid rgba(255,255,255,.2);',
+        'transition:background .15s;',
+      '}',
+      '#__br_chevron:hover{background:#c42850}',
+      '#__br_chevron svg{width:14px;height:14px;fill:currentColor}',
+      // recording state
+      '.br-recording #__br_btn,.br-permanent #__br_btn{background:#1a1a1a}',
+      '.br-recording #__br_btn:hover,.br-permanent #__br_btn:hover{background:#2d2d2d}',
+      '.br-recording #__br_chevron,.br-permanent #__br_chevron{background:#2d2d2d;border-left-color:rgba(255,255,255,.1)}',
+      '.br-recording #__br_chevron:hover,.br-permanent #__br_chevron:hover{background:#3d3d3d}',
+      // saving state
+      '.br-saving #__br_btn{background:#1a1a1a;cursor:default}',
+      '.br-saving #__br_chevron{display:none}',
+      // done state
+      '.br-done #__br_btn{background:#16a34a;cursor:default}',
+      '.br-done #__br_btn:hover{background:#16a34a}',
+      '.br-done #__br_chevron{display:none}',
+      // dropdown
+      '#__br_menu{',
+        'display:none;position:fixed;bottom:56px;right:20px;z-index:2147483647;',
+        'background:#1a1a1f;border:1px solid #333;border-radius:8px;',
+        'min-width:180px;padding:4px;',
+        'box-shadow:0 8px 30px rgba(0,0,0,.5);',
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
+      '}',
+      '#__br_menu.br-open{display:block}',
+      '.br-menu-item{',
+        'display:flex;align-items:center;gap:8px;width:100%;',
+        'padding:8px 12px;border:none;border-radius:6px;cursor:pointer;',
+        'background:transparent;color:#ccc;font-size:13px;font-family:inherit;',
+        'text-align:left;transition:background .1s;',
+      '}',
+      '.br-menu-item:hover{background:rgba(255,255,255,.08);color:#fff}',
+      '.br-menu-sep{height:1px;background:#333;margin:4px 8px}',
       '</style>',
-      '<button id="__br_btn">',
-        '<span id="__br_label">⏺ Record Bug</span>',
-      '</button>',
+      '<div id="__br_group">',
+        '<button id="__br_btn"><span id="__br_label">⏺ Record Bug</span></button>',
+        '<button id="__br_chevron"><svg viewBox="0 0 20 20"><path d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"/></svg></button>',
+      '</div>',
+      '<div id="__br_menu">',
+        '<button class="br-menu-item" id="__br_m_identity">✏️ Edit name & email</button>',
+        '<div class="br-menu-sep"></div>',
+        '<button class="br-menu-item" id="__br_m_permanent">🔴 Permanent recording</button>',
+      '</div>',
     ].join('');
     doc.body.appendChild(wrap);
+
     doc.getElementById('__br_btn').addEventListener('click', function () {
+      closeMenu();
       if (state.isRecording) SDK.stop(); else SDK.start();
+    });
+    doc.getElementById('__br_chevron').addEventListener('click', function (e) {
+      e.stopPropagation();
+      toggleMenu();
+    });
+    doc.getElementById('__br_m_identity').addEventListener('click', function () {
+      closeMenu();
+      showIdentityModal();
+    });
+    doc.getElementById('__br_m_permanent').addEventListener('click', function () {
+      closeMenu();
+      showPermanentModal();
+    });
+    // Close menu on outside click
+    doc.addEventListener('click', function (e) {
+      var menu = doc.getElementById('__br_menu');
+      var chevron = doc.getElementById('__br_chevron');
+      if (menu && !menu.contains(e.target) && e.target !== chevron && !chevron.contains(e.target)) {
+        menu.classList.remove('br-open');
+      }
     });
   }
 
+  function toggleMenu() {
+    var menu = doc.getElementById('__br_menu');
+    if (menu) menu.classList.toggle('br-open');
+  }
+
+  function closeMenu() {
+    var menu = doc.getElementById('__br_menu');
+    if (menu) menu.classList.remove('br-open');
+  }
+
   function setWidget(cls, label) {
+    var group = doc.getElementById('__br_group');
     var btn = doc.getElementById('__br_btn');
     var lbl = doc.getElementById('__br_label');
-    if (!btn) return;
-    btn.className = cls ? 'br-' + cls : '';
+    if (!group) return;
+    group.className = cls ? 'br-' + cls : '';
     btn.disabled = cls === 'saving' || cls === 'done';
     if (label !== undefined) lbl.textContent = label;
   }
 
   function startTimer() {
     _timerInterval = setInterval(function () {
-      setWidget('recording', '⏹ ' + formatDuration(Date.now() - state.startTime));
+      if (state.isPermanent) {
+        trimPermanentBuffer();
+        var elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+        var windowSec = state.permanentDuration;
+        var windowStart, windowEnd;
+        if (elapsed <= windowSec) {
+          windowStart = new Date(state.startTime);
+          windowEnd = new Date();
+        } else {
+          windowStart = new Date(Date.now() - windowSec * 1000);
+          windowEnd = new Date();
+        }
+        setWidget('permanent', '⏹ ' + formatTime(windowStart) + ' → ' + formatTime(windowEnd));
+      } else {
+        setWidget('recording', '⏹ ' + formatDuration(Date.now() - state.startTime));
+      }
     }, 500);
   }
 
   function stopTimer() {
     if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+    if (_trimInterval) { clearInterval(_trimInterval); _trimInterval = null; }
+    if (_snapshotInterval) { clearInterval(_snapshotInterval); _snapshotInterval = null; }
+  }
+
+  // ── Identity modal ──────────────────────────────────────────────────────
+  function showIdentityModal() {
+    var overlay = doc.createElement('div');
+    overlay.id = '__bugreel_identity_overlay__';
+    var styles = [
+      'position:fixed;inset:0;z-index:2147483647;',
+      'display:flex;align-items:center;justify-content:center;',
+      'background:rgba(0,0,0,.55);backdrop-filter:blur(4px);',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
+    ].join('');
+
+    overlay.innerHTML = [
+      '<div style="' + styles + '">',
+      '<div style="background:#1a1a1f;border:1px solid #333;border-radius:12px;padding:24px;width:340px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.5)">',
+        '<div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:4px">Your identity</div>',
+        '<div style="font-size:12px;color:#888;margin-bottom:16px">This is attached to your bug recordings</div>',
+        '<input id="__br_id_email" type="email" placeholder="your@email.com" value="' + (_reporter.email || '') + '" style="',
+          'width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;',
+          'border:1px solid #333;background:#111;color:#fff;font-size:14px;',
+          'outline:none;margin-bottom:10px;',
+        '"/>',
+        '<input id="__br_id_name" type="text" placeholder="Name (optional)" value="' + (_reporter.name || '') + '" style="',
+          'width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;',
+          'border:1px solid #333;background:#111;color:#fff;font-size:14px;',
+          'outline:none;margin-bottom:16px;',
+        '"/>',
+        '<div style="display:flex;gap:8px;justify-content:flex-end">',
+          '<button id="__br_id_cancel" style="padding:8px 16px;border-radius:6px;border:1px solid #333;background:transparent;color:#888;cursor:pointer;font-size:13px">Cancel</button>',
+          '<button id="__br_id_save" style="padding:8px 16px;border-radius:6px;border:none;background:#ff4070;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Save</button>',
+        '</div>',
+      '</div>',
+      '</div>',
+    ].join('');
+
+    doc.body.appendChild(overlay);
+    doc.getElementById('__br_id_email').focus();
+
+    function close() { overlay.remove(); }
+    function save() {
+      var email = doc.getElementById('__br_id_email').value.trim();
+      var name = doc.getElementById('__br_id_name').value.trim();
+      if (email) {
+        _reporter.email = email;
+        _reporter.name = name || null;
+        saveReporter();
+      }
+      close();
+    }
+    doc.getElementById('__br_id_cancel').addEventListener('click', close);
+    doc.getElementById('__br_id_save').addEventListener('click', save);
+    doc.getElementById('__br_id_email').addEventListener('keydown', function (e) { if (e.key === 'Enter') save(); });
+    doc.getElementById('__br_id_name').addEventListener('keydown', function (e) { if (e.key === 'Enter') save(); });
+  }
+
+  // ── Permanent recording modal ───────────────────────────────────────────
+  function showPermanentModal() {
+    var overlay = doc.createElement('div');
+    overlay.id = '__bugreel_permanent_overlay__';
+    var styles = [
+      'position:fixed;inset:0;z-index:2147483647;',
+      'display:flex;align-items:center;justify-content:center;',
+      'background:rgba(0,0,0,.55);backdrop-filter:blur(4px);',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
+    ].join('');
+
+    var durations = [10, 20, 30];
+    var optionsHtml = durations.map(function (d) {
+      var sel = d === state.permanentDuration ? ' style="background:#ff4070;color:#fff;border-color:#ff4070"' : '';
+      return '<button class="__br_perm_dur" data-dur="' + d + '"' + sel + '>' + d + 's</button>';
+    }).join('');
+
+    overlay.innerHTML = [
+      '<div style="' + styles + '">',
+      '<div style="background:#1a1a1f;border:1px solid #333;border-radius:12px;padding:24px;width:380px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.5)">',
+        '<div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:4px">Permanent recording</div>',
+        '<div style="font-size:12px;color:#999;margin-bottom:16px;line-height:1.5">',
+          'Records continuously in the background, keeping only the last N seconds. ',
+          'When you hit stop, only that window is saved and uploaded. ',
+          'Useful to catch bugs that happen unexpectedly.',
+        '</div>',
+        '<div style="font-size:13px;color:#aaa;margin-bottom:8px;font-weight:500">Duration to keep</div>',
+        '<div id="__br_perm_opts" style="display:flex;gap:8px;margin-bottom:20px">',
+          optionsHtml,
+        '</div>',
+        '<style>',
+          '.__br_perm_dur{padding:8px 18px;border-radius:6px;border:1px solid #444;background:transparent;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit;transition:all .15s}',
+          '.__br_perm_dur:hover{border-color:#888;color:#fff}',
+        '</style>',
+        '<div style="display:flex;gap:8px;justify-content:flex-end">',
+          '<button id="__br_perm_cancel" style="padding:8px 16px;border-radius:6px;border:1px solid #333;background:transparent;color:#888;cursor:pointer;font-size:13px;font-family:inherit">Cancel</button>',
+          '<button id="__br_perm_start" style="padding:8px 16px;border-radius:6px;border:none;background:#ff4070;color:#fff;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">Start recording</button>',
+        '</div>',
+      '</div>',
+      '</div>',
+    ].join('');
+
+    doc.body.appendChild(overlay);
+
+    // Duration selection
+    var selectedDur = state.permanentDuration;
+    var opts = overlay.querySelectorAll('.__br_perm_dur');
+    for (var i = 0; i < opts.length; i++) {
+      opts[i].addEventListener('click', function () {
+        selectedDur = parseInt(this.getAttribute('data-dur'));
+        for (var j = 0; j < opts.length; j++) {
+          opts[j].style.background = 'transparent';
+          opts[j].style.color = '#aaa';
+          opts[j].style.borderColor = '#444';
+        }
+        this.style.background = '#ff4070';
+        this.style.color = '#fff';
+        this.style.borderColor = '#ff4070';
+      });
+    }
+
+    function close() { overlay.remove(); }
+    doc.getElementById('__br_perm_cancel').addEventListener('click', close);
+    doc.getElementById('__br_perm_start').addEventListener('click', function () {
+      state.permanentDuration = selectedDur;
+      close();
+      SDK.startPermanent();
+    });
+  }
+
+  // ── Ticket creation modal ──────────────────────────────────────────────
+  function showTicketModal(reelId, reelUrl) {
+    var overlay = doc.createElement('div');
+    overlay.id = '__bugreel_ticket_overlay__';
+    var styles = [
+      'position:fixed;inset:0;z-index:2147483647;',
+      'display:flex;align-items:center;justify-content:center;',
+      'background:rgba(0,0,0,.55);backdrop-filter:blur(4px);',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
+    ].join('');
+
+    var providerName = state.ticketProvider || 'your tracker';
+
+    overlay.innerHTML = [
+      '<div style="' + styles + '">',
+      '<div style="background:#1a1a1f;border:1px solid #333;border-radius:12px;padding:24px;width:420px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.5)">',
+        '<div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:4px">Create a ticket</div>',
+        '<div style="font-size:12px;color:#888;margin-bottom:16px">This will create a ticket in ' + providerName + '</div>',
+        '<input id="__br_ticket_title" type="text" placeholder="Bug: ..." style="',
+          'width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;',
+          'border:1px solid #333;background:#111;color:#fff;font-size:14px;',
+          'outline:none;margin-bottom:10px;',
+        '"/>',
+        '<textarea id="__br_ticket_desc" placeholder="Describe the issue..." rows="4" style="',
+          'width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;',
+          'border:1px solid #333;background:#111;color:#fff;font-size:14px;',
+          'outline:none;margin-bottom:10px;resize:vertical;min-height:80px;',
+          'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;',
+        '"></textarea>',
+        '<div id="__br_ticket_error" style="display:none;color:#ff4070;font-size:12px;margin-bottom:10px"></div>',
+        '<div style="display:flex;gap:8px;justify-content:flex-end">',
+          '<button id="__br_ticket_skip" style="padding:8px 16px;border-radius:6px;border:1px solid #333;background:transparent;color:#888;cursor:pointer;font-size:13px">Skip</button>',
+          '<button id="__br_ticket_submit" style="padding:8px 20px;border-radius:6px;border:none;background:#ff4070;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Create ticket</button>',
+        '</div>',
+      '</div>',
+      '</div>',
+    ].join('');
+
+    doc.body.appendChild(overlay);
+    doc.getElementById('__br_ticket_title').focus();
+
+    function close() { overlay.remove(); }
+
+    function skip() {
+      close();
+      try { navigator.clipboard.writeText(reelUrl); } catch (e) {}
+      if (cfg.widget !== false) {
+        setWidget('done', '\u2713 Link copied!');
+        setTimeout(function () { setWidget('', '\u23FA Record Bug'); }, 4000);
+      }
+    }
+
+    // Click outside the card = skip
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay || e.target === overlay.firstChild) skip();
+    });
+
+    doc.getElementById('__br_ticket_skip').addEventListener('click', skip);
+
+    doc.getElementById('__br_ticket_submit').addEventListener('click', function () {
+      var titleEl = doc.getElementById('__br_ticket_title');
+      var descEl = doc.getElementById('__br_ticket_desc');
+      var errorEl = doc.getElementById('__br_ticket_error');
+      var submitBtn = doc.getElementById('__br_ticket_submit');
+      var titleValue = titleEl.value.trim();
+      var descValue = descEl.value.trim();
+
+      if (!titleValue) {
+        errorEl.textContent = 'Title is required';
+        errorEl.style.display = 'block';
+        titleEl.focus();
+        return;
+      }
+
+      errorEl.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating\u2026';
+      submitBtn.style.opacity = '0.7';
+      submitBtn.style.cursor = 'default';
+
+      fetch(cfg.host + '/api/ingest/ticket?token=' + encodeURIComponent(cfg.token), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reelId: reelId, title: titleValue, description: descValue }),
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ticketUrl) {
+          close();
+          try { navigator.clipboard.writeText(data.ticketUrl); } catch (e) {}
+          if (cfg.widget !== false) {
+            setWidget('done', '\u2713 Ticket created');
+            setTimeout(function () { setWidget('', '\u23FA Record Bug'); }, 4000);
+          }
+        } else {
+          var msg = data.message || data.statusMessage || (typeof data.error === 'string' ? data.error : '') || 'Failed to create ticket';
+          throw new Error(msg);
+        }
+      })
+      .catch(function (e) {
+        errorEl.textContent = e.message || 'Failed to create ticket';
+        errorEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create ticket';
+        submitBtn.style.opacity = '1';
+        submitBtn.style.cursor = 'pointer';
+      });
+    });
+
+    doc.getElementById('__br_ticket_title').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doc.getElementById('__br_ticket_submit').click();
+    });
   }
 
   // ── Reporter identity ──────────────────────────────────────────────────
@@ -688,7 +1175,7 @@
           '"/>',
           '<div style="display:flex;gap:8px;justify-content:flex-end">',
             '<button id="__br_skip" style="padding:8px 16px;border-radius:6px;border:1px solid #333;background:transparent;color:#888;cursor:pointer;font-size:13px">Skip</button>',
-            '<button id="__br_save" style="padding:8px 16px;border-radius:6px;border:none;background:#e53e3e;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Save & Upload</button>',
+            '<button id="__br_save" style="padding:8px 16px;border-radius:6px;border:none;background:#ff4070;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Save & Upload</button>',
           '</div>',
         '</div>',
         '</div>',
@@ -855,6 +1342,11 @@
         } else {
           doc.addEventListener('DOMContentLoaded', createWidget);
         }
+        // Check if a ticket integration is configured
+        fetch(cfg.host + '/api/ingest/integration?token=' + encodeURIComponent(cfg.token))
+          .then(function (r) { return r.json(); })
+          .then(function (data) { state.ticketProvider = data.provider || null; })
+          .catch(function () { state.ticketProvider = null; });
       }).catch(function (err) {
         console.warn('[bugreel] Could not load dependencies:', err);
       });
@@ -875,9 +1367,30 @@
       return this;
     },
 
+    /** Start permanent recording with a rolling window. */
+    startPermanent: function () {
+      if (state.isRecording) return this;
+      state.isPermanent = true;
+      // Trim buffer every second (keeps 1.5× the configured duration)
+      _trimInterval = setInterval(trimPermanentBuffer, 1000);
+      // Force a full DOM snapshot every 2s so the trim always has a
+      // snapshot close to the window boundary (rrweb's checkoutEveryNth
+      // is mutation-based and useless on quiet pages).
+      _snapshotInterval = setInterval(function () {
+        if (!state.isRecording) return;
+        try {
+          if (global.rrweb && global.rrweb.record && global.rrweb.record.takeFullSnapshot) {
+            global.rrweb.record.takeFullSnapshot();
+          }
+        } catch (e) { /* ignore */ }
+      }, 2000);
+      return this.start();
+    },
+
     /** Start recording programmatically. */
     start: function () {
       if (state.isRecording) return this;
+      if (!state.isPermanent) state.isPermanent = false;
 
       // (Re-)patch fetch/XHR right before recording — survives HMR / framework overwrites
       patchNetwork();
@@ -927,7 +1440,11 @@
       startRrweb();
       if (cfg.widget !== false) {
         startTimer();
-        setWidget('recording', '⏹ 0s');
+        if (state.isPermanent) {
+          setWidget('permanent', '⏹ ' + formatTime(new Date()) + ' → ' + formatTime(new Date()));
+        } else {
+          setWidget('recording', '⏹ 0s');
+        }
       }
       return this;
     },
@@ -935,12 +1452,17 @@
     /** Stop recording, compress, and upload (or download locally if no API config). */
     stop: async function () {
       if (!state.isRecording) return;
+      var wasPermanent = state.isPermanent;
       state.isRecording = false;
+      state.isPermanent = false;
       stopTimer();
       if (state.rrwebStopFn) { state.rrwebStopFn(); state.rrwebStopFn = null; }
 
       // Stop PerformanceObserver
       if (_perfObserver) { _perfObserver.disconnect(); _perfObserver = null; }
+
+      // Final trim for permanent mode
+      if (wasPermanent) trimPermanentFinal();
 
       if (cfg.widget !== false) setWidget('saving', '⏳ Saving…');
 
@@ -1001,15 +1523,23 @@
       }
       _capturedBodies = {};
 
+      // For permanent recordings, the trim already updated all timestamps.
+      // events[0] is a meta event with timestamp = window start.
+      var effectiveStartTime = state.startTime;
+      if (wasPermanent && rrwebEvents.length > 1) {
+        effectiveStartTime = rrwebEvents[0].timestamp;
+        duration = rrwebEvents[rrwebEvents.length - 1].timestamp - effectiveStartTime;
+      }
+
       var recording = {
         version: '1.0',
         meta: {
           url: location.href,
           title: doc.title,
-          recordedAt: new Date(state.startTime).toISOString(),
+          recordedAt: new Date(effectiveStartTime).toISOString(),
           duration: duration,
           userAgent: navigator.userAgent,
-          source: 'sdk',
+          source: wasPermanent ? 'sdk-permanent' : 'sdk',
         },
         rrwebEvents: rrwebEvents,
         consoleEvents: state.consoleEvents.slice(),
@@ -1029,10 +1559,15 @@
         try {
           var reelId = await compressAndUpload(recording);
           var reelUrl = cfg.host + '/reel/' + reelId;
-          try { await navigator.clipboard.writeText(reelUrl); } catch (_) {}
-          if (cfg.widget !== false) {
-            setWidget('done', '✓ Link copied!');
-            setTimeout(function () { setWidget('', '⏺ Record Bug'); }, 4000);
+          if (state.ticketProvider) {
+            if (cfg.widget !== false) setWidget('', '\u23FA Record Bug');
+            showTicketModal(reelId, reelUrl);
+          } else {
+            try { await navigator.clipboard.writeText(reelUrl); } catch (_) {}
+            if (cfg.widget !== false) {
+              setWidget('done', '\u2713 Link copied!');
+              setTimeout(function () { setWidget('', '\u23FA Record Bug'); }, 4000);
+            }
           }
         } catch (err) {
           console.error('[bugreel] Upload failed:', err);
