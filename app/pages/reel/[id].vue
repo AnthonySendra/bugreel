@@ -32,6 +32,7 @@ const interactionsListEl = ref<HTMLElement | null>(null)
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const activeTab = ref<'console' | 'network' | 'interactions' | 'comments'>('console')
+const sidePanelOpen = ref(false)
 const comments = ref<any[]>([])
 const newCommentContent = ref('')
 const openReplyId = ref<string | null>(null)
@@ -1739,8 +1740,19 @@ onUnmounted(() => {
             </div>
         </div>
 
+        <!-- Side panel toggle (mobile) -->
+        <button class="side-panel-toggle" :class="{ 'side-panel-toggle--open': sidePanelOpen }" @click="sidePanelOpen = !sidePanelOpen">
+          <svg v-if="!sidePanelOpen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/>
+          </svg>
+          <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+        <!-- Side panel overlay (mobile) -->
+        <div v-if="sidePanelOpen" class="side-panel-overlay" @click="sidePanelOpen = false" />
         <!-- Side panel -->
-        <div id="side-panel">
+        <div id="side-panel" :class="{ 'side-panel--open': sidePanelOpen }">
           <div id="tab-bar">
             <button
               class="tab-btn"
@@ -2370,6 +2382,7 @@ onUnmounted(() => {
   display: flex;
   overflow: hidden;
   min-height: 0;
+  position: relative;
 }
 
 /* ── Player ──────────────────────────────────────────────────────────────── */
@@ -2406,6 +2419,95 @@ onUnmounted(() => {
   flex-direction: column;
   background: #1c1c1f;
   min-height: 0;
+}
+
+/* ── Side panel toggle (mobile) ─────────────────────────────────────────── */
+.side-panel-toggle {
+  display: none;
+}
+
+.side-panel-overlay {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .side-panel-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 20;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #1c1c1f;
+    border: 1px solid #2e2e33;
+    color: #8b8b98;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    transition: color 0.15s, background 0.15s;
+  }
+
+  .side-panel-toggle:hover {
+    color: #e2e2e6;
+    background: #242428;
+  }
+
+  .side-panel-toggle--open {
+    right: auto;
+    left: 12px;
+    z-index: 52;
+  }
+
+  .side-panel-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 49;
+  }
+
+  #side-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 85vw;
+    max-width: 380px;
+    z-index: 50;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+  }
+
+  #side-panel.side-panel--open {
+    transform: translateX(0);
+  }
+
+  #meta-bar {
+    padding: 0 6px;
+    gap: 4px;
+  }
+
+  .meta-action--playwright,
+  .meta-action--inspect,
+  .meta-action--dom {
+    display: none;
+  }
+
+  .meta-action span {
+    display: none;
+  }
+
+  #controls {
+    padding: 0 8px;
+    gap: 6px;
+  }
+
+  #time-display {
+    font-size: 9px;
+  }
 }
 
 #tab-bar {
