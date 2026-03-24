@@ -352,15 +352,25 @@ function onSeekerInput() {
 function onSeekerMouseup() {
   const offset = Number(seekerEl.value?.value ?? 0)
   clock.baseOffset = offset
-  if (seekingFrom) {
-    replayer?.play(offset)
-    clock.play(offset)
-    if (playBtnEl.value) playBtnEl.value.textContent = '⏸'
-    scheduleTick()
-  } else {
-    replayer?.pause(offset)
-    updateUI(offset)
-  }
+  // Recreate replayer to avoid rrweb DocumentType bug on backward seek
+  recreateReplayer()
+  replayer?.play(0)
+  requestAnimationFrame(() => {
+    try {
+      if (seekingFrom) {
+        replayer?.play(offset)
+        clock.play(offset)
+        if (playBtnEl.value) playBtnEl.value.textContent = '⏸'
+        scheduleTick()
+      } else {
+        replayer?.pause(offset)
+        clock.pause()
+        clock.baseOffset = offset
+        if (playBtnEl.value) playBtnEl.value.textContent = '▶'
+        updateUI(offset)
+      }
+    } catch {}
+  })
   seekingFrom = null
 }
 
@@ -1554,8 +1564,17 @@ function seekRelative(deltaMs: number) {
   const newOffset = Math.max(0, Math.min(clock.current + deltaMs, totalDuration))
   const wasPlaying = clock.seek(newOffset)
   if (replayer) {
-    replayer.pause(newOffset)
-    if (wasPlaying) replayer.play(newOffset)
+    recreateReplayer()
+    replayer.play(0)
+    requestAnimationFrame(() => {
+      try {
+        if (wasPlaying) {
+          replayer?.play(newOffset)
+        } else {
+          replayer?.pause(newOffset)
+        }
+      } catch {}
+    })
   }
   updateUI(newOffset)
 }
