@@ -513,7 +513,7 @@ function seekPreview(e: MouseEvent) {
     </section>
 
     <!-- Install (static landing only) -->
-    <section v-if="!isStatic" id="install" class="pb-24 px-6 scroll-mt-20">
+    <section v-if="isStatic" id="install" class="pb-24 px-6 scroll-mt-20">
       <div class="max-w-3xl mx-auto">
         <h2 class="text-2xl font-bold text-white mb-2 text-center">Install</h2>
         <p class="text-sm text-neutral-500 mb-10 text-center">Get bugreel running on your infrastructure in seconds.</p>
