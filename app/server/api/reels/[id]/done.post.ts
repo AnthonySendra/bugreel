@@ -116,6 +116,19 @@ export default defineEventHandler(async (event) => {
             )
             ticketClosed = true
           }
+        } else if (app.ticket_provider === 'github') {
+          // ticket_id is "#123", extract the number
+          const issueNumber = reel.ticket_id.replace('#', '')
+          await $fetch<any>(`https://api.github.com/repos/${config.owner}/${config.repo}/issues/${issueNumber}`, {
+            method: 'PATCH',
+            headers: {
+              'Authorization': `Bearer ${config.token}`,
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+            },
+            body: { state: 'closed' },
+          })
+          ticketClosed = true
         }
       } catch {
         // Best-effort: don't fail the request if ticket closing fails

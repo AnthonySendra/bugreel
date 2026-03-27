@@ -171,6 +171,31 @@ export default defineEventHandler(async (event) => {
       if (err.statusCode) throw err
       throw createError({ statusCode: 502, message: err.message || 'Failed to create Jira issue' })
     }
+  } else if (app.ticket_provider === 'github') {
+    if (!config.token || !config.owner || !config.repo) {
+      throw createError({ statusCode: 500, message: 'GitHub integration is misconfigured' })
+    }
+
+    try {
+      const response = await $fetch<any>(`https://api.github.com/repos/${config.owner}/${config.repo}/issues`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.token}`,
+          'Accept': 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+        body: {
+          title,
+          body: fullDescription,
+        },
+      })
+
+      ticketId = `#${response.number}`
+      ticketUrl = response.html_url
+    } catch (err: any) {
+      if (err.statusCode) throw err
+      throw createError({ statusCode: 502, message: err.message || 'Failed to create GitHub issue' })
+    }
   } else {
     throw createError({ statusCode: 400, message: `Unsupported provider: ${app.ticket_provider}` })
   }

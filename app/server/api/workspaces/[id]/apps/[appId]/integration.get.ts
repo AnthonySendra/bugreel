@@ -20,6 +20,11 @@ function maskSecrets(config: Record<string, any>, provider: string): Record<stri
       ? '****' + masked.apiToken.slice(-4)
       : '****'
   }
+  if (provider === 'github' && masked.token) {
+    masked.token = masked.token.length > 4
+      ? '****' + masked.token.slice(-4)
+      : '****'
+  }
   return masked
 }
 

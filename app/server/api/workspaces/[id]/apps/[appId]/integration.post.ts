@@ -25,8 +25,8 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const provider = body?.provider
 
-  if (!provider || (provider !== 'linear' && provider !== 'jira')) {
-    throw createError({ statusCode: 400, message: 'provider must be "linear" or "jira"' })
+  if (!provider || (provider !== 'linear' && provider !== 'jira' && provider !== 'github')) {
+    throw createError({ statusCode: 400, message: 'provider must be "linear", "jira", or "github"' })
   }
 
   const config = body?.config
@@ -116,6 +116,37 @@ export default defineEventHandler(async (event) => {
       return { ok: true, projects: projectList, issueTypes }
     } catch (err: any) {
       return { ok: false, error: err.message || 'Failed to connect to Jira' }
+    }
+  }
+
+  if (provider === 'github') {
+    if (!config.token || typeof config.token !== 'string') {
+      throw createError({ statusCode: 400, message: 'config.token is required' })
+    }
+
+    const ghHeaders = {
+      'Authorization': `Bearer ${config.token}`,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    }
+
+    try {
+      // Validate token by fetching user info
+      await $fetch<any>('https://api.github.com/user', { headers: ghHeaders })
+
+      // Fetch repos the token has access to
+      const repos = await $fetch<any[]>('https://api.github.com/user/repos?per_page=100&sort=updated', {
+        headers: ghHeaders,
+      })
+
+      const repoList = Array.isArray(repos)
+        ? repos.map((r: any) => ({ full_name: r.full_name, name: r.name, owner: r.owner?.login }))
+        : []
+
+      return { ok: true, repos: repoList }
+    } catch (err: any) {
+      const msg = err?.data?.message || err?.message || 'Failed to connect to GitHub'
+      return { ok: false, error: msg }
     }
   }
 })

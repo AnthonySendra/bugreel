@@ -62,7 +62,6 @@ Connect your apps to **Linear** or **Jira** to streamline your bug workflow:
 - **Create tickets from recordings** — after stopping a recording (SDK) or from the reel player (dashboard), open a modal to create a ticket with a title and description. The reel URL is automatically appended.
 - **Bidirectional sync** — marking a reel as "done" closes the linked ticket on Linear/Jira. A background sync job (every 5 min) checks ticket statuses and marks reels as done when their ticket is completed on the provider side.
 - **Reel naming** — when a ticket is created, the reel is automatically renamed to `TICKET-ID - Title` for easy identification.
-- **Configuration** — set up integrations per app in the **Integrations** tab (API key for Linear, site URL + email + API token for Jira). Test connection before saving.
 
 ### Webhook notifications (Slack, Discord, Mattermost)
 

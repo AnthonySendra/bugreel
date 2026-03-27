@@ -78,6 +78,31 @@ async function checkJiraIssue(
   }
 }
 
+async function checkGitHubIssue(
+  ticketId: string,
+  config: { token: string; owner: string; repo: string },
+): Promise<'done' | 'open' | 'error'> {
+  try {
+    const issueNumber = ticketId.replace('#', '')
+    const issue = await $fetch<any>(
+      `https://api.github.com/repos/${config.owner}/${config.repo}/issues/${issueNumber}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${config.token}`,
+          'Accept': 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      },
+    )
+
+    if (!issue?.state) return 'error'
+    return issue.state === 'closed' ? 'done' : 'open'
+  } catch (err: any) {
+    if (err?.statusCode === 404 || err?.status === 404) return 'error'
+    return 'error'
+  }
+}
+
 async function syncTickets() {
   // Get all reels that have a linked ticket, are not done, and not skipped
   const reels = db
@@ -144,6 +169,8 @@ async function syncTickets() {
         result = await checkLinearIssue(reel.ticket_id, appConfig.config.apiKey)
       } else if (appConfig.provider === 'jira') {
         result = await checkJiraIssue(reel.ticket_id, appConfig.config)
+      } else if (appConfig.provider === 'github') {
+        result = await checkGitHubIssue(reel.ticket_id, appConfig.config)
       } else {
         result = 'error'
       }

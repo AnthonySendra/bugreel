@@ -31,8 +31,8 @@ export default defineEventHandler(async (event) => {
     return { provider: null, config: null }
   }
 
-  if (provider !== 'linear' && provider !== 'jira') {
-    throw createError({ statusCode: 400, message: 'Provider must be "linear", "jira", or null' })
+  if (provider !== 'linear' && provider !== 'jira' && provider !== 'github') {
+    throw createError({ statusCode: 400, message: 'Provider must be "linear", "jira", "github", or null' })
   }
 
   const config = body?.config
@@ -67,6 +67,18 @@ export default defineEventHandler(async (event) => {
     }
     if (!config.projectKey || typeof config.projectKey !== 'string') {
       throw createError({ statusCode: 400, message: 'config.projectKey is required for Jira' })
+    }
+  }
+
+  if (provider === 'github') {
+    if (!config.token || typeof config.token !== 'string') {
+      throw createError({ statusCode: 400, message: 'config.token is required for GitHub' })
+    }
+    if (!config.owner || typeof config.owner !== 'string') {
+      throw createError({ statusCode: 400, message: 'config.owner is required for GitHub' })
+    }
+    if (!config.repo || typeof config.repo !== 'string') {
+      throw createError({ statusCode: 400, message: 'config.repo is required for GitHub' })
     }
   }
 

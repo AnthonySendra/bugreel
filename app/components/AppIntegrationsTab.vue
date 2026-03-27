@@ -5,7 +5,7 @@ const props = defineProps<{
   headers: Record<string, string>
 }>()
 
-type Provider = 'linear' | 'jira'
+type Provider = 'linear' | 'jira' | 'github'
 
 interface Integration {
   provider: Provider
@@ -38,18 +38,25 @@ const jiraSelectedProject = ref('')
 const jiraIssueTypes = ref<{ label: string; value: string }[]>([])
 const jiraSelectedIssueType = ref('')
 
+// GitHub fields
+const githubToken = ref('')
+const githubRepos = ref<{ label: string; value: string }[]>([])
+const githubSelectedRepo = ref('')
+
 // ── Computed ─────────────────────────────────────────────────────────────────
 const baseUrl = computed(() => `/api/workspaces/${props.workspaceId}/apps/${props.appId}/integration`)
 
 const canTest = computed(() => {
   if (selectedProvider.value === 'linear') return !!linearApiKey.value.trim()
   if (selectedProvider.value === 'jira') return !!jiraSiteUrl.value.trim() && !!jiraEmail.value.trim() && !!jiraApiToken.value.trim()
+  if (selectedProvider.value === 'github') return !!githubToken.value.trim()
   return false
 })
 
 const canSave = computed(() => {
   if (selectedProvider.value === 'linear') return !!linearApiKey.value.trim() && !!linearSelectedTeam.value
   if (selectedProvider.value === 'jira') return !!jiraSiteUrl.value.trim() && !!jiraEmail.value.trim() && !!jiraApiToken.value.trim() && !!jiraSelectedProject.value && !!jiraSelectedIssueType.value
+  if (selectedProvider.value === 'github') return !!githubToken.value.trim() && !!githubSelectedRepo.value
   return false
 })
 
@@ -67,7 +74,9 @@ async function loadIntegration() {
         config: data.config,
         teamOrProject: data.provider === 'linear'
           ? data.config.teamName
-          : data.config.projectName || data.config.projectKey,
+          : data.provider === 'github'
+            ? `${data.config.owner}/${data.config.repo}`
+            : data.config.projectName || data.config.projectKey,
       }
     } else {
       currentIntegration.value = null
@@ -91,6 +100,8 @@ async function testConnection() {
     const body: Record<string, any> = { provider: selectedProvider.value }
     if (selectedProvider.value === 'linear') {
       body.config = { apiKey: linearApiKey.value.trim() }
+    } else if (selectedProvider.value === 'github') {
+      body.config = { token: githubToken.value.trim() }
     } else {
       body.config = {
         siteUrl: jiraSiteUrl.value.trim(),
@@ -117,6 +128,10 @@ async function testConnection() {
     if (selectedProvider.value === 'jira' && data.projects) {
       jiraProjects.value = data.projects.map((p: any) => ({ label: `${p.key} — ${p.name}`, value: p.key }))
       if (jiraProjects.value.length === 1) jiraSelectedProject.value = jiraProjects.value[0].value
+    }
+    if (selectedProvider.value === 'github' && data.repos) {
+      githubRepos.value = data.repos.map((r: any) => ({ label: r.full_name, value: r.full_name }))
+      if (githubRepos.value.length === 1) githubSelectedRepo.value = githubRepos.value[0].value
     }
     testSuccess.value = true
   } catch (e: any) {
@@ -169,6 +184,13 @@ async function saveIntegration() {
         apiKey: linearApiKey.value.trim(),
         teamId: linearSelectedTeam.value,
         teamName: linearTeams.value.find(t => t.value === linearSelectedTeam.value)?.label,
+      }
+    } else if (selectedProvider.value === 'github') {
+      const [owner, repo] = githubSelectedRepo.value.split('/')
+      body.config = {
+        token: githubToken.value.trim(),
+        owner,
+        repo,
       }
     } else {
       body.config = {
@@ -227,6 +249,8 @@ function selectProvider(provider: Provider) {
   jiraSelectedProject.value = ''
   jiraIssueTypes.value = []
   jiraSelectedIssueType.value = ''
+  githubRepos.value = []
+  githubSelectedRepo.value = ''
 }
 
 function resetForm() {
@@ -241,6 +265,9 @@ function resetForm() {
   jiraSelectedProject.value = ''
   jiraIssueTypes.value = []
   jiraSelectedIssueType.value = ''
+  githubToken.value = ''
+  githubRepos.value = []
+  githubSelectedRepo.value = ''
   testSuccess.value = false
   error.value = ''
 }
@@ -410,15 +437,16 @@ onMounted(() => {
       <div class="settings-card space-y-4">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
-            <!-- Linear / Jira logo -->
+            <!-- Linear / Jira / GitHub logo -->
             <svg v-if="currentIntegration.provider === 'linear'" class="w-5 h-5" viewBox="0 0 100 100" fill="currentColor"><path d="M1.22541 61.5228c-.97437 2.2107.67508 4.8855 3.04498 4.8855 1.21745 0 2.33584-.684 2.88498-1.7683l28.8001-56.8116c1.2869-2.53813-.5765-5.4844-3.3628-5.3155-1.2207.0739-2.2928.8074-2.8271 1.934L1.22541 61.5228ZM21.9282 73.128c-1.4791 2.233.3765 5.2066 3.0523 4.8953 1.1506-.1338 2.1375-.882 2.618-1.989L52.7999 17.2246c1.0832-2.4997-.7741-5.2246-3.4633-5.0863-1.1696.0602-2.1942.7877-2.7232 1.9257L21.9282 73.128ZM42.2913 84.8795c-1.7076 2.2335.1916 5.3702 3.0732 5.0835 1.1086-.1103 2.0758-.8327 2.5766-1.9252L73.34 37.0486c.996-2.1724-.4606-4.6742-2.8268-4.8519-1.1968-.0898-2.3344.5326-2.9695 1.6189L42.2913 84.8795ZM62.8382 96.4565c-1.6501 2.1877.1247 5.2645 2.9523 5.0555.948-.0701 1.8124-.552 2.3135-1.2913.0461-.068.0909-.1377.1344-.2088L98.0547 37.2924c1.0035-2.1909-.4511-4.7088-2.835-4.8987-1.2057-.0961-2.358.5291-2.9928 1.6229L62.8382 96.4565Z"/></svg>
+            <svg v-else-if="currentIntegration.provider === 'github'" class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z"/></svg>
             <svg v-else class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84H11.53ZM6.77 7.17c0 2.4 1.96 4.35 4.34 4.35h1.78v1.7c0 2.4 1.97 4.35 4.35 4.35V7.99a.84.84 0 0 0-.84-.82H6.77ZM2 12.31c0 2.4 1.97 4.35 4.35 4.36h1.78v1.7c.01 2.39 1.97 4.34 4.35 4.34v-9.57a.84.84 0 0 0-.84-.84L2 12.31Z"/></svg>
             <div>
               <p class="text-sm font-medium text-(--ui-text)">
-                {{ currentIntegration.provider === 'linear' ? 'Linear' : 'Jira' }}
+                {{ currentIntegration.provider === 'linear' ? 'Linear' : currentIntegration.provider === 'github' ? 'GitHub Issues' : 'Jira' }}
               </p>
               <p v-if="currentIntegration.teamOrProject" class="text-xs text-(--ui-text-dimmed) mt-0.5">
-                {{ currentIntegration.provider === 'linear' ? 'Team' : 'Project' }}: {{ currentIntegration.teamOrProject }}
+                {{ currentIntegration.provider === 'linear' ? 'Team' : 'Repository' }}: {{ currentIntegration.teamOrProject }}
               </p>
             </div>
           </div>
@@ -452,7 +480,7 @@ onMounted(() => {
       <!-- Provider cards -->
       <div>
         <p class="text-xs font-semibold text-(--ui-text-muted) uppercase tracking-wider mb-3">Choose a provider</p>
-        <div class="grid grid-cols-2 gap-3 max-w-md">
+        <div class="grid grid-cols-3 gap-3 max-w-md">
           <button
             class="provider-card"
             :class="{ 'provider-card-active': selectedProvider === 'linear' }"
@@ -468,6 +496,14 @@ onMounted(() => {
           >
             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84H11.53ZM6.77 7.17c0 2.4 1.96 4.35 4.34 4.35h1.78v1.7c0 2.4 1.97 4.35 4.35 4.35V7.99a.84.84 0 0 0-.84-.82H6.77ZM2 12.31c0 2.4 1.97 4.35 4.35 4.36h1.78v1.7c.01 2.39 1.97 4.34 4.35 4.34v-9.57a.84.84 0 0 0-.84-.84L2 12.31Z"/></svg>
             <span class="text-sm font-medium">Jira</span>
+          </button>
+          <button
+            class="provider-card"
+            :class="{ 'provider-card-active': selectedProvider === 'github' }"
+            @click="selectProvider('github')"
+          >
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z"/></svg>
+            <span class="text-sm font-medium">GitHub</span>
           </button>
         </div>
       </div>
@@ -579,6 +615,55 @@ onMounted(() => {
         </UFormField>
 
         <div v-if="jiraProjects.length" class="flex justify-end">
+          <UButton
+            label="Save"
+            icon="i-lucide-check"
+            size="sm"
+            :loading="saving"
+            :disabled="!canSave"
+            @click="saveIntegration"
+          />
+        </div>
+      </div>
+
+      <!-- GitHub form -->
+      <div v-if="selectedProvider === 'github'" class="settings-card space-y-4">
+        <UFormField label="Personal Access Token">
+          <UInput
+            v-model="githubToken"
+            type="password"
+            placeholder="ghp_... or github_pat_..."
+            class="w-full"
+          />
+        </UFormField>
+        <p class="text-xs text-(--ui-text-dimmed)">
+          Needs <code>repo</code> scope. Create one at GitHub → Settings → Developer settings → Personal access tokens.
+        </p>
+
+        <div class="flex items-center gap-2">
+          <UButton
+            label="Test connection"
+            icon="i-lucide-zap"
+            size="sm"
+            variant="outline"
+            color="neutral"
+            :loading="testing"
+            :disabled="!canTest"
+            @click="testConnection"
+          />
+          <UBadge v-if="testSuccess" label="Connection successful" color="success" variant="subtle" />
+        </div>
+
+        <UFormField v-if="githubRepos.length" label="Repository">
+          <USelect
+            v-model="githubSelectedRepo"
+            :items="githubRepos"
+            placeholder="Select a repository"
+            class="w-full"
+          />
+        </UFormField>
+
+        <div v-if="githubRepos.length" class="flex justify-end">
           <UButton
             label="Save"
             icon="i-lucide-check"

@@ -490,9 +490,9 @@ function seekPreview(e: MouseEvent) {
           <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-2">
             <h3 class="text-white font-medium text-sm flex items-center gap-2">
               <UIcon name="i-lucide-plug" class="text-neutral-500" />
-              Linear &amp; Jira Integration
+              GitHub, Linear &amp; Jira Integration
             </h3>
-            <p class="text-sm text-neutral-400 leading-relaxed">Create tickets directly from recordings. Bidirectional sync &mdash; mark a reel as done to close the ticket, or close the ticket to mark the reel as done.</p>
+            <p class="text-sm text-neutral-400 leading-relaxed">Create issues and tickets directly from recordings. Bidirectional sync &mdash; mark a reel as done to close the issue, or close it to mark the reel as done.</p>
           </div>
           <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-2">
             <h3 class="text-white font-medium text-sm flex items-center gap-2">
@@ -513,14 +513,14 @@ function seekPreview(e: MouseEvent) {
     </section>
 
     <!-- Install (static landing only) -->
-    <section v-if="isStatic" id="install" class="pb-24 px-6 scroll-mt-20">
+    <section v-if="!isStatic" id="install" class="pb-24 px-6 scroll-mt-20">
       <div class="max-w-3xl mx-auto">
         <h2 class="text-2xl font-bold text-white mb-2 text-center">Install</h2>
         <p class="text-sm text-neutral-500 mb-10 text-center">Get bugreel running on your infrastructure in seconds.</p>
 
         <div class="grid sm:grid-cols-2 gap-4 mb-6">
           <!-- Docker -->
-          <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-3">
+          <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-3 min-w-0 overflow-hidden">
             <div class="flex items-center gap-2 mb-1">
               <UIcon name="i-lucide-container" class="text-bugreel-400 text-lg" />
               <h3 class="text-white font-semibold text-sm">Docker</h3>
@@ -541,7 +541,7 @@ function seekPreview(e: MouseEvent) {
           </div>
 
           <!-- From source -->
-          <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-3">
+          <div class="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-5 space-y-3 min-w-0 overflow-hidden">
             <div class="flex items-center gap-2 mb-1">
               <UIcon name="i-lucide-terminal" class="text-bugreel-400 text-lg" />
               <h3 class="text-white font-semibold text-sm">From source</h3>
